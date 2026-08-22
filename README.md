@@ -1,7 +1,10 @@
 # Word Lookup
 
-Select a word in any app and a card pops up with its meaning, part of speech, synonyms, an
-example sentence, plus the translation and its own example in a language you pick on first run.
+An unfamiliar word used to mean a tab switch, and every tab switch meant losing the next ten
+minutes of focus. Word Lookup fixes that. Select a word anywhere, and a card appears right at
+your cursor, meaning, part of speech, synonyms, an example sentence, and the translation in the
+language you pick. It works in any app where you can select text, a PDF, Word, Slack, a browser,
+whatever you're reading. No tab switch, no app switch, nothing ever leaves the page.
 
 <p align="center">
   <img src="screenshots/popup-demo.gif" width="150" alt="Word Lookup popup animation" />
