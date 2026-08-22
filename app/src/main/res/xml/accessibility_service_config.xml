@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Was byte-identical to the shipped v0.1.0 APK. Deliberately no longer is:
+     flagIncludeNotImportantViews is added because v0.1.0's flag set only ever
+     produced selections in browsers. Views not marked important-for-
+     accessibility are excluded by default, and that covers a great many
+     ordinary text views in native apps, so their selection events never
+     reached the service at all.
+
+     No packageNames filter, so this applies to every app; notificationTimeout
+     stays at 200 ms to coalesce the burst of events a drag-select produces. -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeViewTextSelectionChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows|flagIncludeNotImportantViews"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/accessibility_service_description"
+    android:notificationTimeout="200"
+    android:settingsActivity="com.harish.wordlookup.ui.MainActivity" />

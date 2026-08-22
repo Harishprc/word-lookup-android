@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    API 31+ backup/transfer format - same exclusions as backup_rules.xml
+    (kept in sync: ApiKeyStore's two SharedPreferences files, one plaintext
+    on the Keystore-corruption fallback path). See backup_rules.xml for why.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="secure_settings.xml" />
+        <exclude domain="sharedpref" path="secure_settings_fallback.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="secure_settings.xml" />
+        <exclude domain="sharedpref" path="secure_settings_fallback.xml" />
+    </device-transfer>
+</data-extraction-rules>

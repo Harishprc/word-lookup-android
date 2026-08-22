@@ -1,0 +1,35 @@
+# Gradle / Android build output
+.gradle/
+build/
+app/build/
+local.properties
+*.apk
+*.aab
+*.jks
+*.keystore
+keystore.properties
+
+# IDE
+.idea/
+*.iml
+.kotlin/
+
+# Reference extraction (large, regenerable from WordLookup-apk.zip)
+reference/extracted/
+reference/frames/
+reference/jadx/
+
+# Reference artifact + derived extraction output - regenerable from it via
+# tools/apk_inventory.py / tools/jadx_digest.py, no reason to carry in git.
+WordLookup-apk.zip
+reference/*.txt
+reference/inventory-original.json
+reference/inventory-ours.json
+reference/jadx.log
+
+# Raw phone screenshots/recording - only the converted, renamed copies in
+# screenshots/ are meant to ship in the repo.
+Images/
+
+# OS
+Thumbs.db

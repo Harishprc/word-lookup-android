@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Values recovered from resources.arsc in the shipped APK. accent matches
+     colors.tertiary (#7C5CFF) in the desktop app's DESIGN.md design tokens. -->
+<resources>
+    <color name="accent">#FF7C5CFF</color>
+    <color name="accent_off">#FF6B6F7A</color>
+    <color name="card_top">#FFFDFDFE</color>
+    <color name="card_bottom">#FFEDF2FB</color>
+    <color name="divider">#FFE2E7F0</color>
+    <color name="word_text">#FF1A1A1A</color>
+    <color name="pos_text">#FF8A8F9C</color>
+    <color name="meaning_text">#FF333333</color>
+    <color name="synonyms_text">#FF6A6A6A</color>
+    <color name="translation_text">#FF111111</color>
+    <color name="example_text">#FF555555</color>
+</resources>

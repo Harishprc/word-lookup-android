@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Pre-API-31 backup format. ApiKeyStore's two SharedPreferences files hold
+    the Gemini API key - the encrypted one only as ciphertext bound to this
+    device's Keystore (useless after restore, but no reason to ship it), and
+    the plaintext fallback (ApiKeyStore.createPrefs) in the clear whenever
+    EncryptedSharedPreferences.create fails. Auto Backup includes all
+    SharedPreferences by default, so without this exclusion the fallback
+    file's plaintext key would be uploaded to the user's cloud backup.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="secure_settings.xml" />
+    <exclude domain="sharedpref" path="secure_settings_fallback.xml" />
+</full-backup-content>

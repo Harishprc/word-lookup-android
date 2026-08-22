@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Theme.WordLookup extends Theme.Material.Light.NoActionBar (id 0x0102**01
+     resolved from android.jar). Theme.WordLookup.Transparent extends the
+     framework Theme.Translucent.NoTitleBar and overrides windowIsFloating /
+     windowIsTranslucent / windowBackground / windowNoTitle / backgroundDimEnabled
+     - it is ProcessTextActivity's theme, and needs no chrome because the
+     activity itself never draws anything, it just launches the overlay. -->
+<resources>
+    <style name="Theme.WordLookup" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <style name="Theme.WordLookup.Transparent" parent="android:Theme.Translucent.NoTitleBar">
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
+</resources>

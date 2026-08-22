@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Every network call (GeminiProvider) is a hardcoded https:// endpoint;
+    nothing in the app has a legitimate reason to speak cleartext HTTP.
+    Below API 28 the platform default is cleartextTrafficPermitted="true" -
+    this closes that gap explicitly rather than relying on minSdk luck.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>
