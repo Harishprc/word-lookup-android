@@ -6,7 +6,6 @@ colors:
   tertiary: "#9298A1"
   neutral: "#FFFFFF"
   surface: "#FFFFFF"
-  sunken: "#E8EAEE"
   on-surface: "#16181C"
   on-primary: "#FFFFFF"
   outline: "#DDE0E6"
@@ -19,7 +18,6 @@ colors:
   tertiary-dark: "#666B74"
   neutral-dark: "#121316"
   surface-dark: "#1A1C20"
-  sunken-dark: "#24272C"
   on-surface-dark: "#E9EBEF"
   on-primary-dark: "#121316"
   outline-dark: "#2E3238"
@@ -181,7 +179,7 @@ components:
     textColor: "{colors.on-surface}"
     rounded: "{rounded.md}"
   segmented-control-track:
-    backgroundColor: "{colors.sunken}"
+    backgroundColor: "{colors.surface}"
     rounded: "{rounded.md}"
   section-card-title:
     # The uppercase eyebrow label at the top of a section card ("ACCESS",
@@ -222,7 +220,7 @@ components:
     rounded: "{rounded.full}"
     size: 8px
   dark-segmented-control-track:
-    backgroundColor: "{colors.sunken-dark}"
+    backgroundColor: "{colors.surface-dark}"
     rounded: "{rounded.md}"
   dark-section-card-title:
     textColor: "{colors.secondary-dark}"
@@ -284,9 +282,11 @@ on/active state and nothing else. Light and dark are both real, wired themes (`T
   `#7150F0` measured 4.11:1 as button text and needed a separate darker substitute in code.
 - **Brand-identity (#16181C):** The launcher icon, Quick Settings tile, and in-app mark all share
   this ink ground - see "Language-reactive icon" below.
-- **Neutral (#FFFFFF / dark #121316) / Surface (#FFFFFF / dark #1A1C20) / Sunken (#E8EAEE / dark
-  #24272C):** Background, card surface, and the recessed fill (segmented-control track, note
-  panels, and - round 7 - input fields). Neutral and Surface are now the same value in light mode;
+- **Neutral (#FFFFFF / dark #121316) / Surface (#FFFFFF / dark #1A1C20):** Background and card
+  surface. Round 10 retired the separate `Sunken` fill (#E8EAEE / dark #24272C) that used to mark
+  the segmented-control track, note panels, and input fields as recessed - those now read `Surface`
+  like everything else, with a hairline border carrying the structure instead (see "Tiles have
+  shadow, not outline" below). Neutral and Surface are now the same value in light mode;
   since round 7 a tile's edge is a shadow, not a background/surface value contrast, so the two no
   longer need to differ.
 - **Outline (#DDE0E6 / dark #2E3238) / Outline-strong (#C4C9D2 / dark #414650):** Round 7 narrowed
@@ -400,7 +400,10 @@ implying a second tap undoes the first.
 and text fields dropped their 1px hairline border in favour of a soft shadow - `outline` no longer
 means "this is a tile's edge" anywhere in the system. It still means "this is a divider between
 rows inside one tile" (the rule between the two Access permission rows) and "this is the segmented
-control's selected-key edge" - both narrower, intentional survivals, not oversights.
+control's selected-key edge" - both narrower, intentional survivals, not oversights. Round 10 adds a
+third: with `Sunken` retired, `outline` is also "the boundary of a formerly-sunken surface" - text
+fields, the segmented track itself, and note panels all now carry a 1px `outline` hairline where
+they used to carry a grey fill instead.
 
 **The lookup card.** The product's single most important surface, and the one part of this system
 untouched by round 6's repalette - see its own five-color ladder above. Headword and translation
@@ -416,12 +419,16 @@ line, both drawn in the card's own `pos-text` grey so the addition reads as part
 ladder, not as an import of app-theme color into it.
 
 **Status dot.** A granted permission or the enabled master switch reads as a filled `signal`-color
-dot (or track), never a filled pill. This is the *only* place `signal` appears outside the lookup
-card - if a future screen wants the accent for something else, that's a sign the vocabulary is
-being diluted.
+dot (or track), never a filled pill. Round 10 extends this to two more genuinely binary states -
+Home's "This week" tile (a dot when the digest has unread words) and Settings' CSV export
+confirmation (a dot marking a completed export) - both are on/off signals, not decoration, so they
+earn the same token rather than inventing a new one. `signal` still never appears as a filled pill,
+and still never marks anything that isn't a real on/off state.
 
 **Inputs.** Filled, not outlined (round 7 - was `OutlinedTextField`, now a borderless `TextField`
-with a `sunken` fill and no focus/unfocus indicator line, matching the shadow-based tile system).
+with no focus/unfocus indicator line, matching the shadow-based tile system). Round 10 retired the
+`sunken` fill these used to carry - the field is `surface`-colored now, with a 1px `outline` hairline
+added at each call site instead (see "Tiles have shadow, not outline" above).
 `rounded.md` corners, one line each. Password-style masking on both API-key fields by default,
 since both are secrets rendered on a screen a phone's owner might not always be alone with. The
 API-key helper text's `aistudio.google.com` mention is a real tap target (round 7) - it opens

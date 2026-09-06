@@ -2,14 +2,18 @@ package com.harish.wordlookup.data
 
 import com.harish.wordlookup.data.cache.LookupDao
 import com.harish.wordlookup.data.cache.LookupEntity
+import com.harish.wordlookup.data.review.ReviewGrade
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LookupRepositoryTest {
@@ -33,6 +37,36 @@ class LookupRepositoryTest {
         override suspend fun delete(language: String, key: String) {
             rows.remove(language to key)
         }
+
+        override fun observeDueCount(now: Long): Flow<Int> =
+            flowOf(rows.values.count { it.dueAt <= now })
+
+        override suspend fun dueBatch(now: Long, limit: Int): List<LookupEntity> =
+            rows.values.filter { it.dueAt <= now }.sortedBy { it.dueAt }.take(limit)
+
+        override suspend fun updateSchedule(
+            language: String,
+            key: String,
+            dueAt: Long,
+            intervalDays: Int,
+            ease: Double,
+            reps: Int,
+            lapses: Int,
+            lastReviewedAt: Long,
+        ) {
+            val existing = rows[language to key] ?: return
+            rows[language to key] = existing.copy(
+                dueAt = dueAt,
+                intervalDays = intervalDays,
+                ease = ease,
+                reps = reps,
+                lapses = lapses,
+                lastReviewedAt = lastReviewedAt,
+            )
+        }
+
+        override suspend fun nextDueAfter(now: Long): Long? =
+            rows.values.map { it.dueAt }.filter { it > now }.minOrNull()
     }
 
     private fun result(word: String) = LookupResult(original = word, translation = "x-$word")
@@ -141,5 +175,67 @@ class LookupRepositoryTest {
         assertEquals("x-sky", sky.translation)
         assertEquals("x-moon", moon.translation)
         assertSame(sky.translation, skyAgain.translation)
+    }
+
+    @Test
+    fun `loadDueBatch only returns rows already due, oldest first, capped at the limit`() = runTest {
+        val dao = FakeDao()
+        dao.rows["Kannada" to "a"] = LookupEntity("Kannada", "a", "a", "x", createdAt = 1, dueAt = 300)
+        dao.rows["Kannada" to "b"] = LookupEntity("Kannada", "b", "b", "x", createdAt = 1, dueAt = 100)
+        dao.rows["Kannada" to "c"] = LookupEntity("Kannada", "c", "c", "x", createdAt = 1, dueAt = 200)
+        dao.rows["Kannada" to "d"] = LookupEntity("Kannada", "d", "d", "x", createdAt = 1, dueAt = 999) // not due yet
+        val repo = LookupRepository(dao, providerFactory = { TranslationProvider { text -> result(text) } }, timeSource = { 500L })
+
+        val batch = repo.loadDueBatch(limit = 2)
+
+        assertEquals(listOf("b", "c"), batch.map { it.result.original }) // oldest-due first, capped at 2
+    }
+
+    @Test
+    fun `grading a card persists the scheduler's outcome back to the row`() = runTest {
+        val dao = FakeDao()
+        dao.rows["Kannada" to "sky"] = LookupEntity(
+            "Kannada", "sky", "sky", "x", createdAt = 1, dueAt = 100, intervalDays = 3, ease = 2.5, reps = 2,
+        )
+        val repo = LookupRepository(dao, providerFactory = { TranslationProvider { text -> result(text) } }, timeSource = { 1_000_000L })
+        val card = repo.loadDueBatch().first()
+
+        repo.grade(card, ReviewGrade.GOOD)
+
+        val updated = dao.rows["Kannada" to "sky"]!!
+        // reps=2 -> round(3 * 2.5) = 8, per ReviewSchedulerTest's own coverage of the same transition.
+        assertEquals(8, updated.intervalDays)
+        assertEquals(3, updated.reps)
+        assertEquals(1_000_000L + 8 * 24 * 60 * 60 * 1000L, updated.dueAt)
+    }
+
+    @Test
+    fun `observeDueCount reflects only rows due at the given time`() = runTest {
+        val dao = FakeDao()
+        dao.rows["Kannada" to "a"] = LookupEntity("Kannada", "a", "a", "x", createdAt = 1, dueAt = 50)
+        dao.rows["Kannada" to "b"] = LookupEntity("Kannada", "b", "b", "x", createdAt = 1, dueAt = 5_000)
+        val repo = LookupRepository(dao, providerFactory = { TranslationProvider { text -> result(text) } }, timeSource = { 100L })
+
+        assertEquals(1, repo.observeDueCount().first())
+    }
+
+    @Test
+    fun `nextDueAt is null when nothing is scheduled beyond now`() = runTest {
+        val dao = FakeDao()
+        val repo = LookupRepository(dao, providerFactory = { TranslationProvider { text -> result(text) } }, timeSource = { 100L })
+
+        assertNull(repo.nextDueAt())
+    }
+
+    @Test
+    fun `nextDueAt finds the earliest row due strictly after now`() = runTest {
+        val dao = FakeDao()
+        dao.rows["Kannada" to "a"] = LookupEntity("Kannada", "a", "a", "x", createdAt = 1, dueAt = 50) // already due, excluded
+        dao.rows["Kannada" to "b"] = LookupEntity("Kannada", "b", "b", "x", createdAt = 1, dueAt = 9_000)
+        dao.rows["Kannada" to "c"] = LookupEntity("Kannada", "c", "c", "x", createdAt = 1, dueAt = 5_000)
+        val repo = LookupRepository(dao, providerFactory = { TranslationProvider { text -> result(text) } }, timeSource = { 100L })
+
+        assertEquals(5_000L, repo.nextDueAt())
+        assertTrue(repo.nextDueAt()!! < 9_000L)
     }
 }

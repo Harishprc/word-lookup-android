@@ -1,9 +1,20 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
+}
+
+// Real release-signing credentials live outside the repo (see keystore.properties.example).
+// The file is gitignored and only needs to exist on a machine that's actually cutting a
+// release build - assembleDebug and testReleaseUnitTest work fine without it.
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val hasReleaseKeystore = keystorePropertiesFile.exists()
+val keystoreProperties = Properties().apply {
+    if (hasReleaseKeystore) load(keystorePropertiesFile.inputStream())
 }
 
 android {
@@ -14,8 +25,19 @@ android {
         applicationId = "com.harish.wordlookup"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
+        versionCode = 2
         versionName = "0.1.0"
+    }
+
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
@@ -23,9 +45,17 @@ android {
             // The shipped v0.1.0 APK is unshrunk - class and file names survive
             // in its dex. Keeping R8 off is what makes the inventory diff work.
             isMinifyEnabled = false
-            // Signed with the debug key, as the original was. Swap in a real
-            // signing config when this actually ships to anyone.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (hasReleaseKeystore) {
+                signingConfigs.getByName("release")
+            } else {
+                logger.warn(
+                    "keystore.properties not found under $rootDir - assembleRelease will be " +
+                        "signed with the DEBUG key. Copy keystore.properties.example to " +
+                        "keystore.properties and fill in real values before shipping a release " +
+                        "build to anyone."
+                )
+                signingConfigs.getByName("debug")
+            }
         }
     }
 

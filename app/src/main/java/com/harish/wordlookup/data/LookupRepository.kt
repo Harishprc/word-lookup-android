@@ -1,7 +1,13 @@
 package com.harish.wordlookup.data
 
+import android.content.Context
 import com.harish.wordlookup.data.cache.LookupDao
+import com.harish.wordlookup.service.DigestWidgetProvider
+import com.harish.wordlookup.service.WordOfDayWidgetProvider
 import com.harish.wordlookup.data.cache.LookupEntity
+import com.harish.wordlookup.data.review.ReviewCard
+import com.harish.wordlookup.data.review.ReviewGrade
+import com.harish.wordlookup.data.review.ReviewScheduler
 import java.util.Collections
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -24,6 +30,15 @@ class LookupRepository(
     private val dao: LookupDao,
     private val providerFactory: (language: String) -> TranslationProvider,
     private val timeSource: () -> Long = System::currentTimeMillis,
+    /**
+     * Round 11: optional, so every existing test constructing a bare
+     * `LookupRepository(dao, providerFactory = ...)` keeps compiling
+     * unchanged. Non-null only in the real app (`WordLookupApp.onCreate`),
+     * used solely to push a repaint to any placed home-screen widgets when
+     * the register changes - a widget showing a just-deleted word until its
+     * next 30-minute refresh would be a visible, avoidable staleness.
+     */
+    private val context: Context? = null,
 ) {
     private val memoryCache = Collections.synchronizedMap(
         object : LinkedHashMap<CacheKey, LookupResult>(MEMORY_CACHE_SIZE, 0.75f, true) {
@@ -84,6 +99,7 @@ class LookupRepository(
             ),
         )
         memoryCache[cacheKey] = result
+        notifyWidgets()
         return result
     }
 
@@ -117,11 +133,66 @@ class LookupRepository(
         val key = LookupEntity.normalize(original)
         dao.delete(language, key)
         memoryCache.remove(CacheKey(language, key))
+        notifyWidgets()
     }
+
+    /** Reflection-free by construction: `context` is null in every test, so this is a no-op there, never a real widget-manager call. */
+    private fun notifyWidgets() {
+        val ctx = context ?: return
+        WordOfDayWidgetProvider.updateAll(ctx)
+        DigestWidgetProvider.updateAll(ctx)
+    }
+
+    /**
+     * Backs the register's "Quiz - N due" dock. The cutoff is read once,
+     * when the caller starts collecting, not re-evaluated on a timer - the
+     * count still updates live off Room's own table-change invalidation
+     * (a grade, a new lookup), it just won't notice new words crossing into
+     * "due" purely from time passing while nothing else in the table
+     * changes. An honest, minor gap for this round's scope, not silently
+     * assumed away.
+     */
+    fun observeDueCount(): Flow<Int> = dao.observeDueCount(timeSource())
+
+    /** The cap mechanism belongs to [LookupDao.dueBatch]; [DAILY_QUEUE_CAP] is this round's actual number. */
+    suspend fun loadDueBatch(limit: Int = DAILY_QUEUE_CAP): List<ReviewCard> =
+        dao.dueBatch(timeSource(), limit).map { entity ->
+            ReviewCard(
+                result = entity.toResult(),
+                language = entity.language,
+                schedule = ReviewScheduler.State(entity.intervalDays, entity.ease, entity.reps, entity.lapses),
+            )
+        }
+
+    suspend fun grade(card: ReviewCard, grade: ReviewGrade) {
+        val key = LookupEntity.normalize(card.result.original)
+        val now = timeSource()
+        val outcome = ReviewScheduler.grade(card.schedule, grade, now)
+        dao.updateSchedule(
+            language = card.language,
+            key = key,
+            dueAt = outcome.dueAt,
+            intervalDays = outcome.state.intervalDays,
+            ease = outcome.state.ease,
+            reps = outcome.state.reps,
+            lapses = outcome.state.lapses,
+            lastReviewedAt = now,
+        )
+    }
+
+    /** When the next word beyond today's capped batch becomes due - the review screen's "Done" state shows this. */
+    suspend fun nextDueAt(): Long? = dao.nextDueAfter(timeSource())
 
     private data class CacheKey(val language: String, val key: String)
 
     companion object {
         private const val MEMORY_CACHE_SIZE = 256
+
+        /**
+         * The migration makes every pre-round-8 word due at once - without
+         * this cap, the first quiz session after upgrade would be an
+         * unusable wall of cards instead of a normal daily review.
+         */
+        const val DAILY_QUEUE_CAP = 20
     }
 }

@@ -23,7 +23,9 @@ import androidx.lifecycle.lifecycleScope
 import com.harish.wordlookup.WordLookupApp
 import com.harish.wordlookup.data.TextTruncation
 import com.harish.wordlookup.data.TriggerMode
+import com.harish.wordlookup.ui.CardState
 import com.harish.wordlookup.ui.LookupCard
+import com.harish.wordlookup.ui.rememberCardSpeech
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -60,10 +62,10 @@ class ProcessTextActivity : ComponentActivity() {
         lifecycleScope.launch {
             when {
                 !app.settings.enabled.first() ->
-                    viewModel.showMessage("Word Lookup is off — turn it on from the app.")
+                    viewModel.showMessage("Word Lookup is off. Turn it on from the app.")
                 // Trigger = "Instant" means the user asked for the overlay only.
                 app.settings.triggerMode.first() == TriggerMode.INSTANT ->
-                    viewModel.showMessage("The menu trigger is off — set Trigger to \"Both\" in Word Lookup to use it.")
+                    viewModel.showMessage("The menu trigger is off. Set Trigger to \"Both\" in Word Lookup to use it.")
                 else ->
                     viewModel.start(TextTruncation.truncate(text), languageHint = app.targetLanguageState.value)
             }
@@ -75,6 +77,9 @@ class ProcessTextActivity : ComponentActivity() {
 @Composable
 private fun ProcessTextContent(viewModel: LookupViewModel, onDismiss: () -> Unit) {
     val state by viewModel.state.collectAsState()
+    // No auto-dismiss timeout on this path (unlike the instant overlay), so
+    // speaking never needs to fight one - the shared factory is used as-is.
+    val speech = (state as? CardState.Result)?.let { rememberCardSpeech(it.result) }
 
     Box(
         Modifier
@@ -88,6 +93,10 @@ private fun ProcessTextContent(viewModel: LookupViewModel, onDismiss: () -> Unit
         // Box behind it and dismisses - the card should only go away on a tap
         // outside it. An empty detectTapGestures here consumes the down event
         // before it reaches the parent's.
-        LookupCard(state, modifier = Modifier.pointerInput(Unit) { detectTapGestures { } })
+        LookupCard(
+            state,
+            modifier = Modifier.pointerInput(Unit) { detectTapGestures { } },
+            speech = speech,
+        )
     }
 }

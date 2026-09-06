@@ -40,7 +40,7 @@ class GeminiProviderTest {
         val ex = assertThrows(MalformedReplyException::class.java) {
             provider.parseModelJson("not json at all {")
         }
-        assertEquals("Could not read model reply — try again.", ex.message)
+        assertEquals("Could not read model reply. Try again.", ex.message)
     }
 
     @Test
@@ -252,7 +252,7 @@ class GeminiProviderTest {
         }
         val elapsed = System.currentTimeMillis() - started
 
-        assertEquals("Lookup is taking too long — try again.", ex.message)
+        assertEquals("Lookup is taking too long. Try again.", ex.message)
         assertEquals(true, elapsed < 3_000) // nowhere near the 5s the network was told to hang for
     }
 

@@ -12,12 +12,27 @@ whatever you're reading. No tab switch, no app switch, nothing ever leaves the p
   <img src="screenshots/setup.jpg" width="150" alt="Onboarding" />
   <img src="screenshots/register.jpg" width="150" alt="Word register" />
   <img src="screenshots/settings.jpg" width="150" alt="Settings screen" />
+  <img src="screenshots/language-picker.jpg" width="150" alt="Language picker" />
 </p>
+
+## Also in the app
+
+- **Pronunciation.** Tap the speaker icon next to a word or its translation to hear it spoken,
+  on-device.
+- **A quiz.** Saved words you're still shaky on resurface from the register on a spaced-repetition
+  schedule, three grades (again, good, easy) per card.
+- **An optional daily reminder** for the quiz, off by default, and an always-on weekly digest of
+  new words, every Friday.
+- **Export your register** to a CSV file whenever you want a copy outside the app.
+- **A glyph grid** to pick your target language, grouped Indian and World.
+- **Home-screen widgets**: a small word-of-the-day tile you can tap to cycle through your own
+  words, and a wider tile that shows the weekly digest count on Fridays. Add them the normal
+  Android way: long-press your home screen, Widgets, Word Lookup.
 
 ## Supported languages
 
-26 targets, picked on first run, switchable anytime from Settings. The app icon changes to a
-native glyph of your current language.
+26 targets, picked on first run, switchable anytime from Settings' language grid. The app icon
+changes to a native glyph of your current language.
 
 **Indian:** Kannada (ಕ), Hindi (अ), Tamil (த), Telugu (త), Malayalam (മ), Marathi (म), Bengali (ব),
 Gujarati (ગ), Punjabi (ਪ), Odia (ଓ), Urdu (ا)
@@ -67,6 +82,8 @@ a free password just for this app. It is not a credit card and Google does not c
 Open Word Lookup, pick your target language, paste the key you copied, and tap **Save**. That's
 it, the app is ready to use.
 
+**Full data policy:** see [PRIVACY.md](PRIVACY.md) for what's sent to Gemini, what stays on your phone, and what Google's free tier means for your data.
+
 ### Build from source (for developers)
 
 ```bash
@@ -81,12 +98,16 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 - **Display over other apps**: needed to show the lookup card as a floating window.
 - **Accessibility service**: needed only for the instant, no-tap trigger. Skip it and the app
   still works through the selection-menu trigger.
+- **Notifications**: backs the optional daily quiz reminder and the weekly digest notification,
+  both silent, never more than once a day. The home-screen widgets need no permission of their own.
 
 ## Known limitations
 
-- No full walkthrough on every Android device yet, only a Samsung S24 so far.
+- No full walkthrough on every Android device yet, only a Samsung S24 and an emulator so far.
+  Widget placement in particular hasn't been checked across different launchers.
 - Some banking apps refuse to run while Accessibility is on. Settings has a one-tap "Pause for
   banking" to work around this.
+- Signed with the debug key, not a production signature, same as every release so far.
 
 ## License
 

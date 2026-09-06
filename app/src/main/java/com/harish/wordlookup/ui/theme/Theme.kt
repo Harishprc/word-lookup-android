@@ -11,8 +11,10 @@ import androidx.compose.runtime.Composable
  * darkest thing on screen is the primary action, so default-styled Button
  * reads correctly with zero call-site changes. The one signal colour
  * (`secondary`) is reserved for the enabled Switch's checked track; nothing
- * else should read it. `secondaryContainer`/`onSecondaryContainer` carry the
- * sunken surface (segmented track, note panels) rather than any accent tint.
+ * else should read it. `secondaryContainer`/`onSecondaryContainer` and
+ * `surfaceVariant` all resolve to plain `surface` (round 10 retired the
+ * sunken recessed fill) - structure on those surfaces comes from a hairline
+ * border added at each call site, not from a background tint.
  */
 private val LightColors = lightColorScheme(
     primary = InkPrimaryLight,
@@ -21,7 +23,7 @@ private val LightColors = lightColorScheme(
     onPrimaryContainer = InkPrimaryLight,
     secondary = SignalLight,
     onSecondary = OnInkLight,
-    secondaryContainer = SunkenLight,
+    secondaryContainer = SurfaceLight,
     onSecondaryContainer = InkPrimaryLight,
     tertiary = SignalLight,
     onTertiary = OnInkLight,
@@ -29,7 +31,7 @@ private val LightColors = lightColorScheme(
     onBackground = InkPrimaryLight,
     surface = SurfaceLight,
     onSurface = InkPrimaryLight,
-    surfaceVariant = SunkenLight,
+    surfaceVariant = SurfaceLight,
     onSurfaceVariant = InkSecondaryLight,
     outline = HairlineLight,
     outlineVariant = HairlineStrongLight,
@@ -44,7 +46,7 @@ private val DarkColors = darkColorScheme(
     onPrimaryContainer = InkPrimaryDark,
     secondary = SignalDark,
     onSecondary = OnInkDark,
-    secondaryContainer = SunkenDark,
+    secondaryContainer = SurfaceDark,
     onSecondaryContainer = InkPrimaryDark,
     tertiary = SignalDark,
     onTertiary = OnInkDark,
@@ -52,7 +54,7 @@ private val DarkColors = darkColorScheme(
     onBackground = InkPrimaryDark,
     surface = SurfaceDark,
     onSurface = InkPrimaryDark,
-    surfaceVariant = SunkenDark,
+    surfaceVariant = SurfaceDark,
     onSurfaceVariant = InkSecondaryDark,
     outline = HairlineDark,
     outlineVariant = HairlineStrongDark,

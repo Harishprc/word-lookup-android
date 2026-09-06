@@ -71,7 +71,7 @@ class GeminiProvider(
         // blocking execute()), the underlying socket genuinely aborts rather
         // than being abandoned to finish on its own.
         return@withContext withTimeoutOrNull(ladderTimeoutMs) { runLadder(text) }
-            ?: throw LookupFailedException("Lookup is taking too long — try again.")
+            ?: throw LookupFailedException("Lookup is taking too long. Try again.")
     }
 
     private suspend fun runLadder(text: String): LookupResult {
@@ -164,7 +164,7 @@ class GeminiProvider(
             client.newCall(request).await().use { response ->
                 when (response.code) {
                     400, 401, 403 -> throw LookupFailedException("API key rejected (${response.code}). Check the key in Settings.")
-                    404 -> throw LookupFailedException("Model '$modelOverride' not found — check GEMINI_MODEL in Settings (e.g. gemini-flash-lite-latest).")
+                    404 -> throw LookupFailedException("Model '$modelOverride' not found. Check GEMINI_MODEL in Settings (e.g. gemini-flash-lite-latest).")
                     429 -> throw LookupFailedException("Free-tier quota hit (~1,500/day). Wait a minute or try tomorrow.")
                 }
                 if (!response.isSuccessful) {
@@ -181,7 +181,7 @@ class GeminiProvider(
 
                     val translation = (parsed["translation"] as? JsonPrimitive)?.content?.trim().orEmpty()
                     if (translation.isEmpty()) {
-                        throw MalformedReplyException("No translation returned — try again.")
+                        throw MalformedReplyException("No translation returned. Try again.")
                     }
 
                     val meaning = stringField(parsed, "meaning")
@@ -204,7 +204,7 @@ class GeminiProvider(
                 }
             }
         } catch (e: SocketTimeoutException) {
-            throw LookupFailedException("Lookup timed out — check your connection.")
+            throw LookupFailedException("Lookup timed out. Check your connection.")
         } catch (e: IOException) {
             throw LookupFailedException("No internet connection.")
         }
@@ -218,7 +218,7 @@ class GeminiProvider(
         return try {
             Json.parseToJsonElement(text).jsonObject
         } catch (e: Exception) {
-            throw MalformedReplyException("Could not read model reply — try again.")
+            throw MalformedReplyException("Could not read model reply. Try again.")
         }
     }
 

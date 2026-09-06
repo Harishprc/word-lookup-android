@@ -9,6 +9,7 @@ import com.harish.wordlookup.data.LookupRepository
 import com.harish.wordlookup.data.Settings
 import com.harish.wordlookup.data.TriggerMode
 import com.harish.wordlookup.data.cache.LookupDatabase
+import com.harish.wordlookup.data.speech.Speaker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -27,6 +28,8 @@ class WordLookupApp : Application() {
     lateinit var repository: LookupRepository
         private set
     lateinit var launcherIcon: LauncherIcon
+        private set
+    lateinit var speaker: Speaker
         private set
     lateinit var enabledState: StateFlow<Boolean>
         private set
@@ -62,6 +65,7 @@ class WordLookupApp : Application() {
         settings = Settings(this)
         apiKeyStore = ApiKeyStore(this)
         launcherIcon = LauncherIcon(this)
+        speaker = Speaker(this)
         enabledState = settings.enabled.stateIn(applicationScope, SharingStarted.Eagerly, true)
         targetLanguageState = settings.targetLanguage.stateIn(applicationScope, SharingStarted.Eagerly, Languages.DEFAULT.name)
         instantEnabledState = settings.instantEnabled.stateIn(applicationScope, SharingStarted.Eagerly, true)
@@ -69,6 +73,7 @@ class WordLookupApp : Application() {
         repository = LookupRepository(
             dao = LookupDatabase.get(this).lookupDao(),
             providerFactory = { language -> GeminiProvider(apiKeyStore.geminiApiKey, apiKeyStore.geminiModel, language) },
+            context = this,
         )
     }
 }

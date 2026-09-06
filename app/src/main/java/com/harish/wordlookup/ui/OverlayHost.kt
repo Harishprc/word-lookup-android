@@ -11,6 +11,7 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.ComposeView
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
@@ -51,6 +52,24 @@ class OverlayHost(private val context: Context) {
         position(anchor)
         composeView?.post { position(anchor) }
         rescheduleDismiss(state)
+    }
+
+    /**
+     * Round 8: pushes the pending auto-dismiss back out to [timeoutMs] from
+     * now. Called from a speaker button's tap so playback on the *instant*
+     * overlay (the only host with a timeout at all - the popup path has
+     * none, and the register isn't time-limited) doesn't get cut mid-word
+     * by a dismiss that was scheduled before the tap happened.
+     *
+     * Deliberate departure, called out explicitly: the 6s window itself was
+     * recovered byte-exact from the shipped v0.1.0 APK via jadx (see this
+     * file's class doc). Extending it on a speak tap is new behavior this
+     * app is choosing, not something recovered - window flags, gravity and
+     * positioning above are untouched.
+     */
+    fun extendTimeout() {
+        if (composeView == null) return
+        rescheduleDismiss(cardState.value)
     }
 
     fun dismiss() {
@@ -100,7 +119,27 @@ class OverlayHost(private val context: Context) {
             setViewTreeLifecycleOwner(owner)
             setViewTreeViewModelStoreOwner(owner)
             setViewTreeSavedStateRegistryOwner(owner)
-            setContent { LookupCard(cardState.value) }
+            setContent {
+                // Speak buttons on the instant overlay's card, wired through
+                // the shared factory (round 8) - only meaningful once a
+                // result exists, so Loading/Message states pass null and
+                // LookupCard renders exactly as it always has for them.
+                // Every onSpeak is wrapped to extend() the auto-dismiss
+                // first - this host is the only one with a timeout at all,
+                // so the wrapping happens here, not inside the shared
+                // factory the other three hosts also call.
+                val state = cardState.value
+                val speech = (state as? CardState.Result)?.let { result ->
+                    val base = rememberCardSpeech(result.result)
+                    remember(base) {
+                        CardSpeech(
+                            english = base.english.copy(onSpeak = { this@OverlayHost.extendTimeout(); base.english.onSpeak() }),
+                            native = base.native.copy(onSpeak = { this@OverlayHost.extendTimeout(); base.native.onSpeak() }),
+                        )
+                    }
+                }
+                LookupCard(state, speech = speech)
+            }
         }
         val layoutParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,

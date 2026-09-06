@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Round 11: the app's first classic (non-Compose) layout - RemoteViews
+     can only inflate plain XML, not Compose content. Mirrors
+     ui/WidgetPreviewScreen.kt's 2x2 mock: glyph top-left, word + translation
+     stacked, flat card background (see widget_card_background.xml for why
+     it's flat, not the card's real gradient). -->
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_card_background"
+    android:padding="16dp">
+
+    <ImageView
+        android:id="@+id/widget_glyph"
+        android:layout_width="26dp"
+        android:layout_height="26dp"
+        android:layout_alignParentTop="true"
+        android:layout_alignParentStart="true"
+        android:contentDescription="@null" />
+
+    <TextView
+        android:id="@+id/widget_word"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_above="@+id/widget_translation"
+        android:layout_alignParentBottom="false"
+        android:layout_marginBottom="2dp"
+        android:textColor="@color/word_text"
+        android:textStyle="bold"
+        android:textSize="18sp"
+        android:maxLines="1"
+        android:ellipsize="end" />
+
+    <TextView
+        android:id="@+id/widget_translation"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:textColor="@color/translation_text"
+        android:textSize="16sp"
+        android:maxLines="1"
+        android:ellipsize="end" />
+
+    <TextView
+        android:id="@+id/widget_placeholder"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:text="@string/widget_empty_register"
+        android:textColor="@color/pos_text"
+        android:textSize="13sp"
+        android:visibility="gone" />
+
+</RelativeLayout>

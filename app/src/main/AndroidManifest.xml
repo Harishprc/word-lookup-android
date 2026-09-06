@@ -5,6 +5,12 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Round 8: re-arms the review reminder's inexact AlarmManager alarm
+         after a reboot - an alarm alone does not survive one. Round 5
+         removed this same permission when WorkManager (its only other user)
+         was deleted; it returns now for a genuinely new, independent reason,
+         not a revival of anything sync-related. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!-- roundIcon intentionally points at ic_launcher, not ic_launcher_round:
          that is what the shipped v0.1.0 APK actually references (verified via
@@ -444,5 +450,54 @@
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
         </service>
+
+        <!-- Round 8: not exported to other apps - only this app's own
+             AlarmManager PendingIntent and the system's BOOT_COMPLETED
+             broadcast ever reach it. -->
+        <receiver
+            android:name=".service.ReviewReminderReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Round 10: same not-exported shape as ReviewReminderReceiver above,
+             a separate class since the digest is a different feature (data
+             source, day-of-week math, channel) with no Settings toggle. -->
+        <receiver
+            android:name=".service.DigestReminderReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Round 11: unlike the two receivers above, this MUST be exported -
+             the system's own APPWIDGET_UPDATE broadcast (and any other
+             android.appwidget.action.* broadcast AppWidgetProvider handles)
+             originates outside this app's process, from the launcher/host. -->
+        <receiver
+            android:name=".service.WordOfDayWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.harish.wordlookup.action.CYCLE_WORD" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_word_of_day_info" />
+        </receiver>
+
+        <receiver
+            android:name=".service.DigestWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_digest_info" />
+        </receiver>
     </application>
 </manifest>

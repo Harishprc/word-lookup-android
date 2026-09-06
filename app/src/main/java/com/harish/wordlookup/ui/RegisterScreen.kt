@@ -1,6 +1,8 @@
 package com.harish.wordlookup.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,7 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -23,6 +25,8 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.TextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.Typography
@@ -33,10 +37,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.harish.wordlookup.R
@@ -53,6 +59,8 @@ fun RegisterScreen(
     entries: List<RegisterEntry>,
     onDelete: (language: String, original: String) -> Unit,
     onBack: () -> Unit,
+    dueCount: Int = 0,
+    onOpenQuiz: () -> Unit = {},
 ) {
     var query by remember { mutableStateOf("") }
     val filtered = if (query.isBlank()) {
@@ -61,59 +69,118 @@ fun RegisterScreen(
         entries.filter { matchesQuery(it, query) }
     }
 
-    Column(Modifier.fillMaxSize().padding(Spacing.ProminentCard)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            // The only screen in the app with no way back except the system
-            // gesture/button - easy to miss, especially with gesture nav where
-            // there's no visible back affordance at all.
-            IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+    // Scaffold, not a plain Column ending in the dock: the quiz bar must be
+    // a sibling of the scrolling list, not its last item, so it stays fixed
+    // at the screen's foot at any scroll position rather than scrolling
+    // away with everything else - see CLAUDE.md's "Round 8" section for why
+    // this went through two earlier revisions (a header tile, then a
+    // Column-with-weight dock) before landing here.
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        bottomBar = { QuizDock(dueCount = dueCount, onClick = onOpenQuiz) },
+    ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding).padding(Spacing.ProminentCard)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // The only screen in the app with no way back except the system
+                // gesture/button - easy to miss, especially with gesture nav where
+                // there's no visible back affordance at all.
+                IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                }
+                Spacer(Modifier.width(Spacing.SM))
+                // Collapsed from a two-line "Your words" / "N saved lookups"
+                // to one line - the count restated a fact the list right
+                // below it already shows, and the second line cost a row of
+                // vertical space this screen doesn't have to spare once the
+                // bottom dock (below) also claims some.
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text("Your words", style = MaterialTheme.typography.headlineMedium)
+                    Text(
+                        " (${entries.size})",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 4.dp),
+                    )
+                }
             }
-            Spacer(Modifier.width(Spacing.SM))
-            Column {
-                Text("Your words", style = MaterialTheme.typography.headlineMedium)
-                Text(
-                    "${entries.size} saved ${if (entries.size == 1) "lookup" else "lookups"}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+
+            TextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(Radius.LG))
+                    .padding(vertical = Spacing.MD),
+                shape = RoundedCornerShape(Radius.LG),
+                colors = filledFieldColors(),
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                placeholder = { Text("Search word, meaning, synonym…") },
+                singleLine = true,
+            )
+
+            when {
+                entries.isEmpty() -> EmptyState(
+                    title = "No lookups yet",
+                    body = "Select a word in any app and your saved lookups will collect here.",
                 )
-            }
-        }
-
-        TextField(
-            value = query,
-            onValueChange = { query = it },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-                .padding(vertical = Spacing.MD),
-            shape = RoundedCornerShape(Radius.LG),
-            colors = filledFieldColors(),
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-            placeholder = { Text("Search word, meaning, synonym…") },
-            singleLine = true,
-        )
-
-        when {
-            entries.isEmpty() -> EmptyState(
-                title = "No lookups yet",
-                body = "Select a word in any app and your saved lookups will collect here.",
-            )
-            filtered.isEmpty() -> EmptyState(
-                title = "No matches",
-                body = "Nothing here matches \"$query\". Try a different word or spelling.",
-            )
-            else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(Spacing.SM)) {
-                items(filtered) { entry ->
-                    RegisterEntryCard(entry, onDelete)
+                filtered.isEmpty() -> EmptyState(
+                    title = "No matches",
+                    body = "Nothing here matches \"$query\". Try a different word or spelling.",
+                )
+                else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(Spacing.SM)) {
+                    items(filtered) { entry ->
+                        RegisterEntryCard(entry, onDelete)
+                    }
                 }
             }
         }
     }
 }
 
+/**
+ * The quiz's entry point - full-bleed to the screen edge (not inset by the
+ * list's own padding, so it reads as chrome rather than one more card),
+ * with an upward shadow so the list visibly reads as continuing underneath
+ * it instead of appearing to end. `navigationBarsPadding()` sits it above
+ * the gesture-nav pill: this screen is edge-to-edge since round 7's
+ * `enableEdgeToEdge()`, so without it the tap target would land on the
+ * system gesture area. Present and dimmed rather than hidden when
+ * [dueCount] is zero - a control that vanishes teaches nobody it exists.
+ */
 @Composable
-private fun EmptyState(title: String, body: String) {
+private fun QuizDock(dueCount: Int, onClick: () -> Unit) {
+    val active = dueCount > 0
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 12.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .clickable(enabled = active, onClick = onClick, role = Role.Button)
+                .padding(horizontal = Spacing.ProminentCard, vertical = Spacing.MD)
+                .alpha(if (active) 1f else 0.5f),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column {
+                Text("Quiz", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+                Text(
+                    if (active) "$dueCount ${if (dueCount == 1) "word" else "words"} due today" else "Nothing due right now",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text("›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+internal fun EmptyState(title: String, body: String) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -148,10 +215,15 @@ private fun EmptyState(title: String, body: String) {
  * applies no theme at all) - without this the register's copy of the card
  * would render at the app's larger `WordLookupTypography` sizes instead and
  * the two would visibly disagree despite sharing this composable.
+ *
+ * [entry.language] (not the app's current target language) drives the
+ * speaker (round 8): a word saved under a language the user has since
+ * switched away from must still speak in the language it was saved in.
  */
 @Composable
-private fun RegisterEntryCard(entry: RegisterEntry, onDelete: (String, String) -> Unit) {
+internal fun RegisterEntryCard(entry: RegisterEntry, onDelete: (String, String) -> Unit) {
     val shape = RoundedCornerShape(16.dp)
+    val speech = rememberCardSpeech(entry.result, languageName = entry.language)
     Box(
         Modifier
             .fillMaxWidth()
@@ -166,7 +238,7 @@ private fun RegisterEntryCard(entry: RegisterEntry, onDelete: (String, String) -
     ) {
         MaterialTheme(typography = Typography()) {
             Column {
-                LookupResultBody(entry.result, emphasizeWordAndTranslation = true)
+                LookupResultBody(entry.result, emphasizeWordAndTranslation = true, speech = speech)
                 Text(
                     "${entry.language} · ${formatDate(entry.createdAtMillis)}",
                     style = MaterialTheme.typography.bodySmall,

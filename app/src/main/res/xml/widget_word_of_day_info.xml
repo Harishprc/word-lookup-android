@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 2x2, fixed size (resizeMode="none" - the mockup shows one fixed shape,
+     not a resizable tile). updatePeriodMillis is Android's own 30-minute
+     floor, used only as a backstop - real repaints are event-driven, see
+     WordOfDayWidgetProvider. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="110dp"
+    android:minHeight="110dp"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/widget_word_of_day"
+    android:resizeMode="none"
+    android:widgetCategory="home_screen"
+    android:description="@string/widget_word_of_day_description" />

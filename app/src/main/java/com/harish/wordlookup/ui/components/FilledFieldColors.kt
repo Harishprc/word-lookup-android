@@ -7,15 +7,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 /**
- * The borderless, shadow-based field style: a flat `surfaceVariant` fill,
- * no focus/unfocus underline. Matches every other tile in the app once
- * borders were dropped in favour of shading + shadow.
+ * A flat `surface` fill, no focus/unfocus underline (round 10 retired the
+ * recessed `surfaceVariant` fill this used to read). `TextFieldColors` has no
+ * border slot for the filled decoration box, so callers add their own
+ * hairline via `Modifier.border(1.dp, colorScheme.outline, shape)`.
  */
 @Composable
 fun filledFieldColors(): TextFieldColors = TextFieldDefaults.colors(
-    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+    focusedContainerColor = MaterialTheme.colorScheme.surface,
+    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+    disabledContainerColor = MaterialTheme.colorScheme.surface,
     focusedIndicatorColor = Color.Transparent,
     unfocusedIndicatorColor = Color.Transparent,
     disabledIndicatorColor = Color.Transparent,

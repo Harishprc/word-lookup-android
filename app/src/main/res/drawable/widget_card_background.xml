@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- RemoteViews has no gradient primitive, so the card's own #FDFDFE->#EDF2FB
+     wash (LookupCard.kt) is simplified to a flat card_top fill here - a
+     deliberate simplification, not an oversight. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="@color/card_top" />
+    <corners android:radius="16dp" />
+</shape>

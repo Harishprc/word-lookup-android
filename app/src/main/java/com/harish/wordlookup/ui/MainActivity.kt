@@ -1,6 +1,10 @@
 package com.harish.wordlookup.ui
 
+import android.database.ContentObserver
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings as AndroidSettings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -25,6 +29,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,9 +47,13 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.harish.wordlookup.WordLookupApp
 import com.harish.wordlookup.data.Languages
 import com.harish.wordlookup.data.TriggerMode
+import com.harish.wordlookup.service.DigestReminderScheduler
+import com.harish.wordlookup.service.ReviewReminderScheduler
 import com.harish.wordlookup.service.SelectionAccessibilityService
 import com.harish.wordlookup.ui.components.BrandMark
 import com.harish.wordlookup.ui.components.NavigationCard
@@ -67,23 +76,51 @@ class MainActivity : ComponentActivity() {
         // opaque nav-bar contrast scrim - a hard-edged bar cutting across the
         // app's own background instead of blending into it.
         enableEdgeToEdge()
+        val openReview = intent?.getBooleanExtra(EXTRA_OPEN_REVIEW, false) ?: false
+        val openDigest = intent?.getBooleanExtra(EXTRA_OPEN_DIGEST, false) ?: false
         setContent {
             WordLookupTheme {
                 Surface(color = MaterialTheme.colorScheme.background) {
-                    AppRoot(viewModel)
+                    AppRoot(viewModel, startAtReview = openReview, startAtDigest = openDigest)
                 }
             }
         }
     }
+
+    companion object {
+        /** Set by ReviewReminderReceiver's PendingIntent so tapping the notification lands on Review, not Home. */
+        const val EXTRA_OPEN_REVIEW = "open_review"
+
+        /** Set by DigestReminderReceiver's PendingIntent so tapping the notification lands on the digest, not Home. */
+        const val EXTRA_OPEN_DIGEST = "open_digest"
+    }
 }
 
 @Composable
-private fun AppRoot(viewModel: MainViewModel) {
-    var screen by remember { mutableStateOf(Screen.HOME) }
+private fun AppRoot(viewModel: MainViewModel, startAtReview: Boolean = false, startAtDigest: Boolean = false) {
+    var screen by remember {
+        mutableStateOf(
+            when {
+                startAtReview -> Screen.REVIEW
+                startAtDigest -> Screen.DIGEST
+                else -> Screen.HOME
+            },
+        )
+    }
     val onboardingDone by viewModel.onboardingDone.collectAsStateWithLifecycle()
     val language by viewModel.targetLanguage.collectAsStateWithLifecycle()
     val register by viewModel.register.collectAsStateWithLifecycle()
+    val digest by viewModel.digest.collectAsStateWithLifecycle()
     val hasGeminiKey by viewModel.hasGeminiKey.collectAsStateWithLifecycle()
+    val dueCount by viewModel.dueCount.collectAsStateWithLifecycle()
+    val reviewSession by viewModel.reviewSession.collectAsStateWithLifecycle()
+
+    // The notification's PendingIntent can't call startReview() itself - it
+    // only carries a static "open Review" flag, so the load happens here,
+    // once, the same way RegisterScreen's own quiz tap already triggers it.
+    LaunchedEffect(startAtReview) {
+        if (startAtReview) viewModel.startReview()
+    }
 
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -91,6 +128,34 @@ private fun AppRoot(viewModel: MainViewModel) {
     var accessibilityGranted by remember {
         mutableStateOf(Permissions.hasAccessibilityServiceEnabled(context, SELECTION_SERVICE_CLASS))
     }
+
+    val reminderEnabled by viewModel.reminderEnabled.collectAsStateWithLifecycle()
+    val reminderHour by viewModel.reminderHour.collectAsStateWithLifecycle()
+
+    // The single place that keeps the actual AlarmManager alarm in sync with
+    // Settings - reacts to any change (the switch, the hour picker, a fresh
+    // app launch with the reminder already on) rather than each call site
+    // that could flip these values remembering to also touch the scheduler.
+    LaunchedEffect(reminderEnabled, reminderHour) {
+        if (reminderEnabled) {
+            ReviewReminderScheduler.schedule(context, reminderHour)
+        } else {
+            ReviewReminderScheduler.cancel(context)
+        }
+    }
+
+    // Always-on, unlike the review reminder above - no Settings toggle for
+    // the digest (see CLAUDE.md's Round 10 section for why). Keyed on Unit:
+    // there's no settings state to react to, just a once-per-cold-launch
+    // re-arm, idempotent since re-scheduling the same request code just
+    // replaces the pending alarm.
+    LaunchedEffect(Unit) {
+        DigestReminderScheduler.schedule(context)
+    }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { /* Declining leaves the reminder switch on but silent - see SettingsScreen's own doc. */ }
 
     // Both permissions are granted from Settings, outside the app, so re-check
     // on resume. Hoisted here (not inside HomeScreen/SettingsScreen) so the
@@ -105,7 +170,32 @@ private fun AppRoot(viewModel: MainViewModel) {
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+
+        // Round 9: Settings' "Pause now" calls disableSelf() without the app
+        // ever leaving this screen, so there is no resume for the observer
+        // above to catch - accessibilityGranted stayed stale until the user
+        // backgrounded and returned. disableSelf() is also async across a
+        // Binder call, so writing `false` optimistically in the pause lambda
+        // would race it and could lie if the pause failed. A ContentObserver
+        // on the actual setting is authoritative either way, and also covers
+        // a case nobody reported: the service being toggled from system
+        // Settings while this app stays visible (split-screen, or back via
+        // recents with no full resume).
+        val accessibilityObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                accessibilityGranted = Permissions.hasAccessibilityServiceEnabled(context, SELECTION_SERVICE_CLASS)
+            }
+        }
+        context.contentResolver.registerContentObserver(
+            AndroidSettings.Secure.getUriFor("enabled_accessibility_services"),
+            false,
+            accessibilityObserver,
+        )
+
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            context.contentResolver.unregisterContentObserver(accessibilityObserver)
+        }
     }
 
     Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
@@ -136,21 +226,76 @@ private fun AppRoot(viewModel: MainViewModel) {
                     showAddTile = Permissions.needsNotificationRuntimePermission(),
                     onBack = { screen = Screen.HOME },
                     onOpenOverlaySettings = { context.startActivity(Permissions.overlayIntent(context)) },
-                    onOpenAccessibilitySettings = { context.startActivity(Permissions.accessibilitySettingsIntent()) },
+                    onOpenAccessibilitySettings = { screen = Screen.ACCESSIBILITY_CONSENT },
                     onOpenAppInfo = { context.startActivity(Permissions.appInfoIntent(context)) },
                     onEditSetup = { screen = Screen.EDIT_SETUP },
                     onAddTile = { Permissions.requestAddTile(context) { } },
                     onPauseForBanking = { SelectionAccessibilityService.pause() },
+                    reminderEnabled = reminderEnabled,
+                    reminderHour = reminderHour,
+                    onReminderEnabledChange = { enabled ->
+                        viewModel.setReminderEnabled(enabled)
+                        if (enabled && Permissions.needsNotificationRuntimePermission()) {
+                            notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    },
+                    onReminderHourChange = viewModel::setReminderHour,
+                    languageName = language,
+                    languageGlyph = Languages.get(language).glyph,
+                    onOpenLanguage = { screen = Screen.LANGUAGE },
+                    registerEntries = register,
+                    onOpenWidgetPreview = { screen = Screen.WIDGET_PREVIEW },
+                )
+                screen == Screen.DIGEST -> DigestScreen(
+                    entries = digest,
+                    weekStartMillis = viewModel.weekStartMillis,
+                    onDelete = viewModel::deleteWord,
+                    onBack = { screen = Screen.HOME },
+                )
+                screen == Screen.LANGUAGE -> LanguagePickerScreen(
+                    current = language,
+                    onPick = { name ->
+                        viewModel.setLanguage(name)
+                        screen = Screen.SETTINGS
+                    },
+                    onBack = { screen = Screen.SETTINGS },
+                )
+                screen == Screen.TRY_DEMO -> TryLookupScreen(onBack = { screen = Screen.HOME })
+                screen == Screen.WIDGET_PREVIEW -> WidgetPreviewScreen(
+                    languageGlyph = Languages.get(language).glyph,
+                    onBack = { screen = Screen.SETTINGS },
                 )
                 screen == Screen.REGISTER -> RegisterScreen(
                     entries = register,
                     onDelete = viewModel::deleteWord,
                     onBack = { screen = Screen.HOME },
+                    dueCount = dueCount,
+                    onOpenQuiz = {
+                        viewModel.startReview()
+                        screen = Screen.REVIEW
+                    },
+                )
+                screen == Screen.REVIEW -> ReviewScreen(
+                    session = reviewSession,
+                    onGrade = viewModel::gradeCurrentCard,
+                    // Entered only from the register, so back returns there -
+                    // not Home. See Screen.kt's doc for why.
+                    onBack = { screen = Screen.REGISTER },
+                    loadNextDueAt = viewModel::nextDueAt,
+                )
+                screen == Screen.ACCESSIBILITY_CONSENT -> AccessibilityConsentScreen(
+                    onContinue = {
+                        context.startActivity(Permissions.accessibilitySettingsIntent())
+                        screen = Screen.SETTINGS
+                    },
+                    onNotNow = { screen = Screen.SETTINGS },
                 )
                 else -> HomeScreen(
                     viewModel = viewModel,
                     onOpenSettings = { screen = Screen.SETTINGS },
                     onOpenRegister = { screen = Screen.REGISTER },
+                    onOpenDigest = { screen = Screen.DIGEST },
+                    onOpenTryDemo = { screen = Screen.TRY_DEMO },
                 )
             }
         }
@@ -162,10 +307,13 @@ internal fun HomeScreen(
     viewModel: MainViewModel,
     onOpenSettings: () -> Unit,
     onOpenRegister: () -> Unit,
+    onOpenDigest: () -> Unit,
+    onOpenTryDemo: () -> Unit,
 ) {
     val language by viewModel.targetLanguage.collectAsStateWithLifecycle()
     val enabled by viewModel.enabled.collectAsStateWithLifecycle()
     val triggerMode by viewModel.triggerMode.collectAsStateWithLifecycle()
+    val digest by viewModel.digest.collectAsStateWithLifecycle()
 
     Column(
         Modifier
@@ -195,6 +343,23 @@ internal fun HomeScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+
+        NavigationCard(
+            title = "This week",
+            subtitle = if (digest.isEmpty()) {
+                "No new words yet"
+            } else {
+                "${digest.size} new word${if (digest.size == 1) "" else "s"} since Monday"
+            },
+            onClick = onOpenDigest,
+            showActivityDot = digest.isNotEmpty(),
+        )
+
+        NavigationCard(
+            title = "Try a lookup",
+            subtitle = "Select a word, or a whole sentence",
+            onClick = onOpenTryDemo,
+        )
 
         NavigationCard(
             title = "Word register",

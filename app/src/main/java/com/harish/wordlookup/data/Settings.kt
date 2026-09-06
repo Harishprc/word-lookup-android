@@ -2,6 +2,7 @@ package com.harish.wordlookup.data
 
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -17,6 +18,8 @@ class Settings(private val context: Context) {
         val ENABLED = booleanPreferencesKey("enabled")
         val TRIGGER_MODE = stringPreferencesKey("trigger_mode")
         val ONBOARDING_DONE = booleanPreferencesKey("onboarding_done")
+        val REMINDER_ENABLED = booleanPreferencesKey("reminder_enabled")
+        val REMINDER_HOUR = intPreferencesKey("reminder_hour")
     }
 
     val targetLanguage = context.dataStore.data.map { it[Keys.TARGET_LANGUAGE] ?: Languages.DEFAULT.name }
@@ -25,6 +28,17 @@ class Settings(private val context: Context) {
         prefs[Keys.TRIGGER_MODE]?.let { raw -> runCatching { TriggerMode.valueOf(raw) }.getOrNull() } ?: TriggerMode.BOTH
     }
     val onboardingDone = context.dataStore.data.map { it[Keys.ONBOARDING_DONE] ?: false }
+
+    /**
+     * Independent of everything in Phase 3 (the quiz) - deliberately so, per
+     * the standing instruction that the user keeps full freedom over both:
+     * quiz without reminders, reminders without ever opening the quiz, or
+     * neither. Off by default; REMINDER_HOUR only matters once this is true.
+     */
+    val reminderEnabled = context.dataStore.data.map { it[Keys.REMINDER_ENABLED] ?: false }
+
+    /** 24h clock hour. One of DEFAULT_REMINDER_HOURS - see SettingsScreen's SegmentedControl. */
+    val reminderHour = context.dataStore.data.map { it[Keys.REMINDER_HOUR] ?: DEFAULT_REMINDER_HOUR }
 
     /** The no-tap overlay trigger, which is what the Quick Settings tile switches. */
     val instantEnabled = triggerMode.map { it != TriggerMode.MENU_ONLY }
@@ -66,5 +80,19 @@ class Settings(private val context: Context) {
 
     suspend fun setOnboardingDone(value: Boolean) {
         context.dataStore.edit { it[Keys.ONBOARDING_DONE] = value }
+    }
+
+    suspend fun setReminderEnabled(value: Boolean) {
+        context.dataStore.edit { it[Keys.REMINDER_ENABLED] = value }
+    }
+
+    suspend fun setReminderHour(hour: Int) {
+        context.dataStore.edit { it[Keys.REMINDER_HOUR] = hour }
+    }
+
+    companion object {
+        /** 19:00 - an evening default, not itself a fixed hour: the user picks one of DEFAULT_REMINDER_HOURS. */
+        const val DEFAULT_REMINDER_HOUR = 19
+        val DEFAULT_REMINDER_HOURS = listOf(9, 14, 19, 21)
     }
 }

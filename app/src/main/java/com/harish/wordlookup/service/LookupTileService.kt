@@ -1,10 +1,5 @@
 package com.harish.wordlookup.service
 
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.RectF
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.service.quicksettings.Tile
@@ -73,31 +68,10 @@ class LookupTileService : TileService() {
         if (Build.VERSION.SDK_INT >= 29) {
             tile.subtitle = if (instantEnabled) "Instant on" else "Instant off"
         }
-        tile.icon = Icon.createWithBitmap(glyphBitmap(Languages.get(language).glyph))
+        // Full-colour bitmap icons are shown as-is in Quick Settings (unlike
+        // monochrome vector icons, which the system re-tints), so this
+        // renders on-brand regardless of the tile's active/inactive state.
+        tile.icon = Icon.createWithBitmap(WidgetGlyphRenderer.glyphBitmap(Languages.get(language).glyph))
         tile.updateTile()
-    }
-
-    /**
-     * Draws the active language's glyph onto a small ink-square bitmap, so
-     * the tile carries the same identity as the in-app brand mark and the
-     * launcher icon rather than a fixed generic glyph. Full-colour bitmap
-     * icons are shown as-is in Quick Settings (unlike monochrome vector
-     * icons, which the system re-tints), so this renders on-brand regardless
-     * of the tile's active/inactive state.
-     */
-    private fun glyphBitmap(glyph: String): Bitmap {
-        val size = 96
-        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#16181C") }
-        canvas.drawRoundRect(RectF(0f, 0f, size.toFloat(), size.toFloat()), size * 0.3f, size * 0.3f, bg)
-        val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            textSize = size * 0.5f
-            textAlign = Paint.Align.CENTER
-        }
-        val textY = size / 2f - (text.descent() + text.ascent()) / 2f
-        canvas.drawText(glyph, size / 2f, textY, text)
-        return bitmap
     }
 }

@@ -2,5 +2,8 @@
 <resources>
     <string name="app_name">Word Lookup</string>
     <string name="tile_label">Word Lookup</string>
-    <string name="accessibility_service_description">Word Lookup uses this to notice when you select text, so it can show a dictionary card. It only reads the text you select — nothing else on screen is stored or sent anywhere except to the translation API for that selection.</string>
+    <string name="accessibility_service_description">Word Lookup uses this to notice when you select text, so it can show a dictionary card. It only reads the text you select. Nothing else on screen is stored or sent anywhere except to the translation API for that selection.</string>
+    <string name="widget_empty_register">Save your first word to see it here.</string>
+    <string name="widget_word_of_day_description">Word of the day, from your own register.</string>
+    <string name="widget_digest_description">This week\'s new words, once a week.</string>
 </resources>

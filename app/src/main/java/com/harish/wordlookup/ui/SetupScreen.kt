@@ -1,5 +1,7 @@
 package com.harish.wordlookup.ui
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -102,7 +104,8 @@ fun SetupScreen(
                     modifier = Modifier
                         .menuAnchor(MenuAnchorType.PrimaryNotEditable)
                         .fillMaxWidth()
-                        .heightIn(min = 48.dp),
+                        .heightIn(min = 48.dp)
+                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(Radius.LG)),
                     shape = RoundedCornerShape(Radius.LG),
                     colors = filledFieldColors(),
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
@@ -123,7 +126,8 @@ fun SetupScreen(
                 value = geminiKey,
                 onValueChange = { geminiKey = it },
                 label = { Text("API key") },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(Radius.LG)),
                 shape = RoundedCornerShape(Radius.LG),
                 colors = filledFieldColors(),
                 placeholder = { Text(if (hasGeminiKey) "Leave blank to keep the current key" else "Paste your key") },
@@ -156,7 +160,8 @@ fun SetupScreen(
 
         Surface(
             shape = RoundedCornerShape(Radius.LG),
-            color = MaterialTheme.colorScheme.surfaceVariant,
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
             modifier = Modifier.fillMaxWidth().padding(top = Spacing.SM, bottom = Spacing.ProminentCard),
         ) {
             Row(Modifier.padding(Spacing.MD), verticalAlignment = Alignment.Top) {

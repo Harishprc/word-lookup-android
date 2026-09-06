@@ -490,6 +490,417 @@ sent actual phone screenshots - none of them showed up in a build or a test.
   already substitutes the right script font (same mechanism the file's own comment already documents
   for the existing Inter/Noto split - only the Latin family actually changed).
 
+## Round 8 — pronunciation audio, a quiz, an emulator, and one real bug it caught
+
+Three additions from one planning session, each with its own decision trail (see the session's own
+plan artifact for the full reasoning): on-device text-to-speech on the lookup card, spaced-repetition
+review entered from the register, and an independent evening reminder. A fourth thing came free of
+charge: this was the first round with a local Android emulator, and it caught a real layout bug
+before it ever reached the S24.
+
+**Audio: on-device only, deliberately.** `data/speech/Speaker.kt` wraps one process-lifetime
+`android.speech.tts.TextToSpeech`; `data/speech/TtsLocales.kt` maps `Language.code` to a `Locale`
+(routing bare `zh` to `Locale.SIMPLIFIED_CHINESE`, since several TTS engines key their installed-voice
+table by region as well as language). `data.speech.SpeechProvider` is the seam - `Speaker` is the only
+implementation. Sarvam's Bulbul TTS was evaluated and rejected: ₹100 one-time trial credit, then
+₹30/10,000 characters, against the standing "free of cost, always" instruction. `ui/CardSpeechFactory.kt`'s
+`rememberCardSpeech(result, languageName)` is the one entry point every card host calls - the instant
+overlay, the menu popup, the register, and the quiz - so none of them wire TTS by hand.
+`ui/components/SpeakButton.kt` renders nothing for `NOT_SUPPORTED`, and marks `MISSING_DATA` with a
+small dot reusing `R.color.accent` (declared in `colors.xml`, unused everywhere else in the app before
+this - consuming it added zero lines to a file this app otherwise keeps unmodified) - tapping it fires
+`TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA`, confirmed on-device to open the real system voice-picker,
+not a dead control. `OverlayHost.extendTimeout()` is a deliberate departure from the jadx-recovered
+6-second auto-dismiss: without it, tapping the speaker on the instant overlay would let the timeout cut
+playback mid-word.
+
+**Known gap, found on the emulator, not fixed this round:** `Speaker.availability()` is a snapshot read,
+and `rememberCardSpeech`'s `remember()` caches it for the composition's lifetime. On a cold app start,
+if `TextToSpeech`'s async `onInit` hasn't completed yet, the very first availability check can return
+`MISSING_DATA` for a language that is, moments later, actually available - and because nothing
+invalidates that cached snapshot, the button can stay stuck offering "install voice" for a language
+that's already installed, for the life of that card. Confirmed directly: on the emulator's first-ever
+speaker tap of a session, the English button (never `NOT_SUPPORTED` in practice) launched the
+voice-install screen instead of speaking; a fresh app launch minutes later, same word, same button,
+spoke correctly. A real fix needs `Speaker` to expose readiness reactively (a `StateFlow<Boolean>`
+`rememberCardSpeech` collects) rather than a one-shot snapshot - flagged here rather than shipped
+silently.
+
+**Spaced repetition: SM-2-lite, entered from the register, never gated.** `data/review/ReviewScheduler.kt`
+is pure Kotlin (no Android imports, same discipline as `ScriptValidator`/`SelectionExtractor`), taking
+`now` as a parameter rather than reading a clock internally so tests can pin it exactly - see
+`ReviewSchedulerTest.kt` for every grade transition. Three grades: `AGAIN` resets reps, floors ease at
+1.3, and comes back in 10 minutes; `GOOD` steps 1d → 3d → `round(interval × ease)`; `EASY` jumps straight
+to 3d then `round(interval × ease × 1.3)`. Room bumped 3→4→**5**: six columns
+(`dueAt`/`intervalDays`/`ease`/`reps`/`lapses`/`lastReviewedAt`) appended last to `LookupEntity` (same
+positional-constructor trap round 7 already called out for `synonymsNative`), with a real
+`MIGRATION_4_5` - `ALTER TABLE` six times, then `UPDATE lookups SET dueAt = createdAt` so every
+pre-round-8 word enters the queue in save order rather than looking "overdue since the epoch", plus the
+new `dueAt` index. Verified on the emulator, not just asserted: a seeded v4 database with three real rows
+survived a `v5` install-over intact, `synonymsNative` preserved, new columns defaulting exactly as coded.
+`LookupRepository.loadDueBatch()` caps at `DAILY_QUEUE_CAP = 20` - the migration makes every existing
+word due at once, and without the cap the first session after upgrade is an unusable wall of cards.
+
+The quiz has no gate and no master switch - it lives entirely in `RegisterScreen.kt`, reached via a
+bottom-docked bar (`QuizDock`, full-bleed, `navigationBarsPadding()` to clear the gesture-nav pill since
+round 7's `enableEdgeToEdge()`, dimmed rather than hidden when nothing is due) rather than a header tile,
+because a header tile stops being reachable the moment the list scrolls. Same file, one more change while
+it was open: the two-line "Your words" / "N saved lookups" header collapsed to one line,
+`Your words (N)`. `ui/ReviewScreen.kt` is prompt → reveal → grade, cycling until the queue empties into a
+"Done" state that reuses `RegisterScreen`'s own `EmptyState` (made `internal` for this) rather than
+inventing a second empty state, and queries `LookupDao.nextDueAfter` for a real "more words are due
+Tuesday" instead of a generic "come back later." Every grade transition was re-verified against the real
+running app, not just the unit test: grading `ephemeral`/`resilient`/`precise` as Good/Easy/Again on the
+emulator produced exactly the `intervalDays`/`ease`/`reps`/`lapses` `ReviewSchedulerTest` predicts, read
+straight back out of the real Room row.
+
+**A real layout bug the emulator caught.** The revealed card was first built as `Column(Modifier.weight(1f),
+verticalArrangement = Arrangement.Center)` wrapping either the short prompt or the full multi-line card.
+On-device this was not a cosmetic glitch - it was every row of the revealed card drawn on top of every
+other row, a stable, reproducible garbled overlap, confirmed by two screenshots seconds apart being
+pixel-identical (ruling out an animation-transition artifact). Root cause: `Arrangement.Center` computes a
+*negative* offset once a child exceeds its available height, and the revealed card (six-plus stacked text
+lines) reliably exceeded the space the prompt's short content had claimed. Fixed by dropping the
+weight+center approach entirely: the whole screen scrolls (matching Settings/Register elsewhere in the
+app), the prompt is centered with ordinary padding, and the revealed card is a plain, naturally-sized,
+top-down `Column` - the same wrapping `RegisterEntryCard` already used successfully, not a new pattern.
+Re-verified clean on the emulator after the fix. This is the concrete argument for round 8's expanded
+emulator scope (see below): every other piece of round 8 was hand-verified against a running app *because*
+this bug existed and a build-plus-unit-tests pipeline would never have surfaced it.
+
+**The reminder: independent of the quiz, off by default, genuinely silent.** `data/Settings.kt` gained
+`reminderEnabled`/`reminderHour` (`DEFAULT_REMINDER_HOURS = [9, 14, 19, 21]`, labelled Morning/Afternoon/
+Evening/Night in `SettingsScreen.kt`'s new `SegmentedControl` - "Afternoon" wrapped to two lines at
+this width; **fixed in round 9**, see below). `service/ReviewReminderScheduler.kt` uses
+`AlarmManager.setAndAllowWhileIdle(RTC_WAKEUP, ...)` deliberately *inexact* - `setExactAndAllowWhileIdle`
+would need the API 31+ `SCHEDULE_EXACT_ALARM` permission prompt, disproportionate for a once-a-day
+reminder whose whole point is staying quiet. `AlarmManager` over re-adding WorkManager: round 5 removed
+`work-runtime-ktx` deliberately, and reviving it would drag `lifecycle-livedata` back in transitively and
+merge WorkManager's own components into the manifest. `service/ReviewReminderReceiver.kt` handles both its
+own `ACTION_FIRE` and `ACTION_BOOT_COMPLETED` (an inexact alarm does not survive a reboot); it only ever
+posts through the `review_reminder` channel at `IMPORTANCE_LOW` (no sound, no vibration, no heads-up),
+`setAutoCancel(true)`, and re-arms for the next occurrence regardless of whether it actually notified. The
+whole chain was fired for real on the emulator, not just read: enabling the switch triggered the real
+`POST_NOTIFICATIONS` permission dialog; `dumpsys alarm` showed the alarm scheduled for exactly the chosen
+hour; broadcasting `ACTION_FIRE` with nothing due posted nothing; broadcasting it with a row forced due
+posted a notification that Android correctly filed under "Silent" (not the noisy section); tapping it
+launched `MainActivity` with `EXTRA_OPEN_REVIEW` and landed directly on `Screen.REVIEW` with the real due
+batch loaded - the full pipeline, not a mocked slice of it. `RECEIVE_BOOT_COMPLETED` returns to the
+manifest for this - the same permission round 5 removed, back for a genuinely new and independent reason.
+
+**The emulator itself.** `tools/emulator.sh` / `tools/emulator.ps1` boot one of four AVDs
+(`wl_small`/`wl_phone`/`wl_tall`/`wl_tablet`, one shared `system-images;android-35;google_apis;x86_64`
+image) and install the current release build. `tools/env.sh` / `tools/env.ps1` gained
+`$ANDROID_HOME/emulator` on `PATH` - neither had it before, since nothing in this repo needed `emulator.exe`
+until now. Scope grew mid-round from "layout preview only" to full functional testing once it became
+clear `adb install -r` genuinely exercises a Play-Store-style upgrade (proving the v4→v5 migration for
+real) and `adb shell` can force a row due or fire a broadcast directly, making the reminder and quiz
+testable end-to-end without waiting for a real evening. What it still cannot do: `google_apis` (not
+`google_apis_playstore`) has no Play Store, so actual Indic-voice playback, One UI's launcher-icon caching
+(round 6, still open), and a real banking app's reaction to "Pause now" (round 7, still open) remain S24-only.
+
+## Round 9 — reminder icons, a real Pause button, and the bug behind it
+
+Three follow-ups from actually using round 8 on a real screen.
+
+**The stale-`accessibilityGranted` bug, root-caused not guessed.** `accessibilityGranted` in
+`MainActivity.kt`'s `AppRoot` was plain `remember`ed Compose state, recomputed only inside the
+`ON_RESUME` branch of the existing `DisposableEffect` lifecycle observer. Settings' "Pause now"
+(`SelectionAccessibilityService.pause()` → `disableSelf()`) genuinely deregisters the service with the
+OS, but nothing on that path ever re-read `Settings.Secure.enabled_accessibility_services` - so the tap
+worked, and the UI kept claiming ON, until the user backgrounded the app and a resume happened to
+re-run the check. Fixed with a `ContentObserver` on
+`Settings.Secure.getUriFor("enabled_accessibility_services")`, registered in the same
+`DisposableEffect` the resume observer already lives in, recomputing `accessibilityGranted` via the
+existing (untouched) `Permissions.hasAccessibilityServiceEnabled(...)`. An observer rather than
+optimistically writing `false` in the pause lambda, deliberately: `disableSelf()` is async across a
+Binder call, so a same-line write would race it and could lie on the path where the pause failed. The
+`ON_RESUME` check stays for `overlayGranted`, which has no equivalent Secure-settings URI to watch.
+
+Confirmed live on the emulator, not just read as correct: tapping Pause **without leaving the app**
+flipped the Access row to OFF and hid the Pause pill within a moment, cross-checked against
+`adb shell settings get secure enabled_accessibility_services` returning empty at the same instant.
+Re-enabling the service and returning to the app flipped Access back to ON and restored the pill.
+
+**Second-order fix the first one would have broken.** `SettingsScreen.kt`'s "Paused. Android won't let
+an app turn its own accessibility service back on…" confirmation used to live *inside* the
+`if (accessibilityGranted)` branch - harmless while that flag never actually changed after a pause, but
+once it does (the fix above), the branch flip the tap itself causes would have replaced the
+confirmation with the flat "Already off" in the same instant it was supposed to be shown. Hoisted the
+message out from under `pausedJustNow` alone, and added a `LaunchedEffect(accessibilityGranted)` that
+resets `pausedJustNow` back to `false` once the service is genuinely re-enabled (from Access above, or
+system Settings), so the stale "Paused…" text doesn't linger once it's no longer true. Both confirmed
+on-device: the confirmation survives the pause tap that triggers it, and clears itself again once the
+service comes back on.
+
+**Icons instead of words for the reminder hour.** Round 8's `SegmentedControl` shipped
+Morning/Afternoon/Evening/Night as text, and "Afternoon" wrapped to two lines at that width -
+logged and left unfixed there. `ui/components/SegmentedControl.kt` now factors the shared
+track/segment/selection chrome into a private `SegmentedTrack`, with `SegmentedControl` (unchanged
+signature - Home's own control and `Previews.kt` compile untouched) and a new `IconSegmentedControl`
+both built on top of it. Four icons, verified present in `material-icons-extended` 1.7.3 by listing the
+artifact rather than assuming: `Icons.Filled.WbTwilight` (9, sunrise), `LightMode` (14, full sun),
+`NightsStay` (19, moon behind cloud), `Bedtime` (21, moon) - two sun-family and two moon-family, each
+pair kept visually distinct (`WbSunny` deliberately skipped alongside `LightMode`, since the two are
+near-identical suns that would make Morning/Afternoon indistinguishable). `contentDescriptions` carries
+Morning/Afternoon/Evening/Night into the accessibility tree even though the words are off the screen -
+`formatHourLabel` in `SettingsScreen.kt` stays the one place those four strings are defined. Confirmed
+on the emulator: all four icons render on one line with no wrap, and the Evening icon shows selected by
+default, matching `Settings.DEFAULT_REMINDER_HOUR`.
+
+**A pill for "Pause now."** Was a bare `TextButton` - the visually weakest control on a screen where
+everything else is a shadow-tile or a filled button, despite being the one action its whole card exists
+for. Replaced with `PausePill`: `Surface(onClick = ...)`, ink fill (`onSurface`/`surface`
+container/content, `shadowElevation = 4.dp`), the same pairing `ReviewScreen`'s "Show answer" already
+uses for its primary action - reuse, not a new treatment. Ink, not the signal accent: `DESIGN.md`
+reserves `#C4440B` strictly for on/active state (the enabled switch, a granted permission's dot), and
+pausing is neither.
+
+No manifest, dependency, or Room change this round - `dex.app_classes` gains
+`ui.components.SegmentedControlKt$IconSegmentedControl`.
+
+## Round 10 — sunken retired, a weekly digest, CSV export, and four new screens
+
+A design mockup (Claude Design, `Word Lookup.dc.html`, read in full but not retained on this
+machine - only screenshots survive, in this session's scratch history) proposed five things: retire
+the sunken grey fill app-wide, add a weekly digest, add register export (CSV + Anki), add a
+drag-to-expand sentence lookup, and add home/lock-screen widgets. Scoped down deliberately: Anki
+export, the real sentence-lookup Gemini schema change, and a real `AppWidgetProvider` are deferred to
+a later round - this round ships their *screens*, wired to hardcoded or genuinely-local data, not
+their backend risk. Also required, across every string this round touched or added: no em dash
+anywhere in UI-facing text (a direct instruction, separate from the mockup itself).
+
+**Sunken retired, four consumers not two.** The mockup's own rationale named the search field and
+segmented track; grepping `surfaceVariant`/`secondaryContainer` turned up two more real consumers -
+`SetupScreen`'s "Encrypted on this phone" note panel and `AccessibilityConsentScreen`'s "Selections
+only" note panel. `Theme.kt`'s `surfaceVariant` and `secondaryContainer` roles now both map to
+`Surface{Light,Dark}` instead of a separate `Sunken{Light,Dark}` token, and `SunkenLight`/`SunkenDark`
+are deleted from `Color.kt` outright rather than left declared-but-unused - `DESIGN.md`'s `sunken`/
+`sunken-dark` tokens are retired in lockstep, keeping `designmd lint` at 0 errors/0 warnings rather
+than letting them go orphaned. A bare role-remap alone would leave all four surfaces edgeless, so
+each gets an explicit `Modifier.border`/`Surface(border = ...)` hairline (`colorScheme.outline`)
+at its own call site - `FilledFieldColors.kt`, the two `TextField`s in `SetupScreen`, both note
+panels, and `SegmentedControl`'s track `Surface`. `outline` picks up a third meaning alongside round
+7's two ("row-divider inside a tile", "segmented control's selected-key edge"): the boundary of a
+formerly-sunken surface.
+
+**Weekly digest: always-on, not opt-in like the round-8 reminder - and on purpose.** The mockup's own
+Settings screen shows no digest toggle, and the Home tile is unconditional; the reminder is a
+habit-nudge the user might decline, the digest is a passive recap of the user's own data, closer in
+spirit to the register itself (which also has no switch). `data/DigestWeek.kt` (pure Kotlin, `now` as
+a parameter, same discipline as `ScriptValidator`/`ReviewScheduler`) computes the most recent
+Monday-at-midnight and a "Mon 31 Aug to Sun 6 Sep"-style range label - "to", not a dash, per this
+round's own rule. `service/DigestReminderScheduler.kt` and `DigestReminderReceiver.kt` are a
+deliberately separate pair from `ReviewReminderScheduler`/`Receiver`, not a third branch bolted onto
+the existing ones: different data source, different day-of-week math (Friday-only, via a `Calendar`
+loop the daily reminder's scheduler has no equivalent of), different notification channel - one class
+per concept, matching this repo's existing `Speaker`/`ReviewScheduler` separation. Same inexact
+`setAndAllowWhileIdle` choice as round 8, same reasoning (no `SCHEDULE_EXACT_ALARM` prompt). Fixed at
+Friday 9am, not user-configurable this round - the mockup shows no hour picker for it either.
+
+`MainViewModel.digest` filters the *existing* `register` `StateFlow` in memory rather than adding a
+new Room query - verified directly that `register` is already `SharingStarted.Eagerly`-loaded in
+full and unscoped (unlike `dueCount`/`dueBatch`, which were deliberately scoped from the start), so a
+second live query over the same table would be net-new cost, not saved cost. `weekStartMillis` is
+computed once per `MainViewModel` instance: an app kept open across a Monday-00:00 boundary keeps
+showing last week's digest until the process restarts. A known, minor, and deliberately unfixed gap
+this round, in the same spirit as round 8's own honest `observeDueCount`-cutoff note. `createdAt` and
+its index already existed (`LookupEntity.kt`) - no Room migration, schema stays at version 5.
+`RegisterScreen`'s `RegisterEntryCard` moved from `private` to `internal` (the same move round 8 made
+for `EmptyState`) so `ui/DigestScreen.kt` can render the week's words as the identical register card,
+not a second layout - round 6's rule held even for a screen that didn't exist yet when that rule was
+written. `NavigationCard` gained an optional `showActivityDot` param, reusing `PermissionStatusRow`'s
+granted-dot idiom for a third, genuinely binary use of `signal`: "there are unread words this week" -
+flagged explicitly in `DESIGN.md`'s Do's/Don'ts rather than silently widening the vocabulary.
+`AndroidManifest.xml` gains exactly one new component this round: `.service.DigestReminderReceiver`,
+`exported="false"`, `BOOT_COMPLETED`-only filter, same shape as round 8's own receiver - no new
+permission.
+
+**CSV export, Anki and Share both deferred.** The app had zero file-write code of any kind before
+this round (confirmed by grep). `data/export/RegisterCsvExporter.kt` writes via
+`MediaStore.Downloads.EXTERNAL_CONTENT_URI` on API 29+ only - scoped storage needs no permission
+there at all, and a pre-29 fallback would need a runtime `WRITE_EXTERNAL_STORAGE` grant plus a second
+write path this repo's toolchain (android-35 emulator/device only) can't actually verify, so the
+button just states "Requires Android 10 or newer" below that API level rather than attempting a
+legacy path. The Anki-deck button is omitted entirely this round, not shown disabled - an inert
+control invites more confusion than one that simply isn't there yet, matching how this repo has
+avoided half-shipped affordances elsewhere. The mockup's "Share" action is also deferred: it would
+need a new `FileProvider` manifest `<provider>` plus `res/xml/file_paths.xml`, real new manifest
+surface this round's own CSV-write work doesn't need to risk. The success confirmation shows a
+constructed display string ("Downloads/word-lookup-export-2026-09-05.csv"), not a queried real
+filesystem path - scoped storage doesn't hand one back. The CSV's own date column is ISO
+`yyyy-MM-dd`, deliberately different from the register's own display date format - a CSV should be
+machine-parseable and locale-unambiguous, the in-app card should read naturally; same data, two
+honest formats for two different readers. Settings' old single "Change language / API key" tile is
+now two things: a new "Target language" row (glyph avatar, opens the new language-grid screen below)
+and a relabeled "Gemini API key" tile that still opens the existing `SetupScreen`/`EDIT_SETUP` edit
+flow unchanged - language no longer needs that detour to reach.
+
+**Two new full-screen destinations, both hardcoded and explicitly not the real thing.**
+`ui/LanguagePickerScreen.kt` is a full-screen glyph grid (26 languages - confirmed by rereading
+`Languages.kt` directly rather than trusting an earlier miscount - split "Indian"/"World" by a fixed
+index range in the UI layer, since `Language` itself carries no such field), reached only from
+Settings' new "Target language" row; `SetupScreen`'s own onboarding/edit dropdown (round 4's
+`ExposedDropdownMenuBox` fix) is left completely untouched - this is a second, additive entry point,
+not a replacement, so nothing about onboarding's already-working path had to be risked.
+`ui/TryLookupScreen.kt` ("Try a lookup" from Home) is entirely local, hardcoded demo data - the exact
+same discipline the mockup's own `breakdown` array already used - and makes zero Gemini calls: a
+tappable demo word opens the real `LookupCard`/`LookupResultBody` (round 6's shared-renderer rule
+held again), a tappable demo sentence opens a bespoke drag-to-expand card (one-way expand, tap-outside
+dismiss, a 44px drag threshold), because sentence-level word-by-word breakdown isn't part of
+`LookupResult`'s shape and was never meant to be added for a screen that doesn't call the model at
+all. `ui/WidgetPreviewScreen.kt` (from Settings' new "Preview widgets and tile" row, placed directly
+above the pre-existing "Add tile to Quick Settings" row) is a static, purely illustrative mock of a
+2x2 word-of-the-day tile, a 4x2 wide tile that flips to a digest preview, and a Quick-Settings-shade
+demo - all local `remember` state, never touching `Settings`/`LookupTileService`, and the screen's own
+header text says "A preview" plainly so it can't read as the real thing. Neither screen is a
+functional widget or a functional lookup; both exist so the mockup's visual ideas have a home in the
+running app without taking on an `AppWidgetProvider` or a Gemini prompt/schema change this round.
+
+**Em dash cleanup, eight strings.** Full-tree grep (Kotlin source and `strings.xml`) found exactly
+eight runtime, user-facing em dashes: the accessibility-service description, five `GeminiProvider`
+error messages, and two `ProcessTextActivity` off-state messages. Each became a period instead ("Lookup
+is taking too long. Try again.", etc.) - two existing `GeminiProviderTest` assertions were updated to
+match, since they asserted the old exact strings. `ui/previews/Previews.kt`'s `@Preview` names (dev-only,
+never shown to a user) were left alone, out of scope for "in the UI." Every new string this round
+introduced was written without a dash from the start, verified by a final full-tree grep after
+everything above landed - zero em dashes remain outside `Previews.kt`.
+
+Verified: `./gradlew :app:testReleaseUnitTest` green (plus the new `DigestWeekTest`),
+`./gradlew :app:assembleRelease` clean, `designmd lint DESIGN.md` at 0 errors/0 warnings, and an
+`apk_inventory.py --diff` against the pre-round-10 build showing exactly the expected shape: one new
+manifest receiver (`DigestReminderReceiver`), no new permissions, no dependency change, no SQL change
+- everything else in the diff is either the intentional string/class additions above or the usual
+Compose-lambda-numbering churn this file's "Verifying a change" section already documents as expected.
+
+**Emulator-verified this round**, not just build-and-unit-test: `wl_phone` (`tools/emulator.sh`), cold
+install over the round-9 build. Confirmed on a real running app: Home shows all four tiles in the new
+order with a live "No new words yet" digest subtitle (no dot, correctly, since the three seeded
+register rows carry `createdAt` from 1970 - outside any real week); "Try a lookup" opens the demo
+screen, the word tap opens the real `LookupCard` with zero network calls, and the sentence drag
+genuinely expands into the word-by-word breakdown after a real touch-and-drag gesture; "This week"
+opens the digest showing the correct empty state and an em-dash-free "Mon 31 Aug to Sun 6 Sep" range
+label; Settings shows the retheme (white fields/track, hairline borders) and the new row order end to
+end (Target language → Gemini API key → Export register → Review reminder → Preview widgets → Add
+tile → App Info); the language grid opens, shows Kannada selected, and both groups render with the
+correct 11/15 Indian/World split; "Save CSV" produces a real file, confirmed via
+`content query --uri content://media/external/downloads` (`word-lookup-export-2026-09-05.csv`, 711
+bytes for 3 rows) as well as the in-app confirmation text; the widget/tile preview screen and its
+"Pull shade" mock both render and respond to taps, clearly labeled as a preview throughout.
+
+One tooling lesson from this pass, not an app bug: `uiautomator dump /sdcard/x.xml` and
+`adb pull /sdcard/x.xml` need their remote path written as `//sdcard/x.xml` under this Windows/Git-Bash
+setup, or MSYS's path-conversion heuristic silently mangles the argument and the pull grabs a stale
+file from an earlier command instead of erroring - this cost real time chasing a "Target language row
+doesn't respond to taps" phantom that turned out to be `uiautomator`'s tree (once properly dumped)
+correctly showing the row *is* clickable at bounds this session had simply mis-read off a screenshot.
+
+## Round 11 — a drop shadow the card always should have had, and real home-screen widgets
+
+Two independent pieces of follow-up from the round-10 build: the floating lookup card had no drop
+shadow at all, and the user asked for the round-10 widget mockup (`ui/WidgetPreviewScreen.kt`) made
+real.
+
+**The card's missing shadow was never a regression - it never had one.** `ui/LookupCard.kt`'s `Column`
+went straight from `width` to `clip` to `background`, no `.shadow(...)` anywhere in the file, confirmed
+via `git diff` to be original state, not something this session's earlier rounds broke.
+`ui/RegisterScreen.kt`'s `RegisterEntryCard` (round 6's "same card, not a second layout" rule - it
+renders the identical content elsewhere) already carried the shadow this one was missing:
+`elevation = 6.dp`, `shape = RoundedCornerShape(16.dp)`, `clip = false`, applied before the existing
+`.clip(...)` call. Copied those exact values onto `LookupCard` rather than inventing new ones, so the
+popup and the register card keep reading as the same object at the same elevation.
+
+**The reported "instant popup not working" had no code-level cause.** Every file that gates or
+executes the instant trigger - `service/SelectionAccessibilityService.kt`, `service/SelectionExtractor.kt`,
+`res/xml/accessibility_service_config.xml`, and the manifest's `SelectionAccessibilityService`
+`<service>` block - is byte-for-byte unchanged from the initial committed state, confirmed via `git diff`.
+Every round-10-added `LaunchedEffect` in `MainActivity.kt` reads only DataStore values with safe
+`?: default` fallbacks and calls only `AlarmManager`, which no-ops safely if unavailable - no crash
+path was found that would differ between the emulator's fresh install and a real device's upgraded
+one. The most likely real cause, consistent with this app's own Settings-screen copy about Android
+13+'s "Allow restricted settings" flow: installing a new sideloaded build re-locks the accessibility
+service grant, silently, with no crash and no code involved - this is standard Android behavior for any
+sideloaded app that touches a sensitive permission, not something this app's code can prevent or detect
+from inside itself. Not fixed in code; the user was asked to check whether Settings' Accessibility
+service row shows OFF after installing a new build, which would confirm this rather than a real
+regression.
+
+**Real home-screen widgets: classic `RemoteViews`/`AppWidgetProvider`, not Glance.** Confirmed via grep
+that `androidx.glance:glance-appwidget` was never a dependency; adding it now would be this app's first
+new dependency in that direction, and Glance's current releases pull in WorkManager transitively -
+exactly what round 5 deliberately excised (`androidx.work:work-runtime-ktx`) to keep
+`tools/apk_inventory.py --diff` clean, and what round 8/10 avoided reviving for the identical reason
+when choosing raw `AlarmManager` for the reminder/digest alarms. Classic `RemoteViews` costs zero new
+Gradle dependencies - the tradeoff is this app's first classic (non-Compose) `res/layout/` files ever,
+since RemoteViews can only inflate plain XML, not Compose content.
+
+**Two providers, not one.** `service/WordOfDayWidgetProvider.kt` (2x2) and
+`service/DigestWidgetProvider.kt` (4x2/"3x2" as the launcher's own picker actually renders the declared
+`minWidth`, close enough to the mockup's 4x2 intent) are separate classes with separate
+`res/xml/*_info.xml` and `res/layout/*.xml` files, matching this repo's existing "one class per
+concept" discipline (`ReviewReminderScheduler`/`Receiver` vs `DigestReminderScheduler`/`Receiver`) -
+the 2x2 and 4x2 content genuinely differ in shape, not just size.
+
+**Glyph rendering, shared for the first time.** `service/LookupTileService.kt`'s private
+`glyphBitmap()` (round 6, the ink-square-plus-centered-glyph bitmap the Quick Settings tile has always
+used) is now `service/WidgetGlyphRenderer.glyphBitmap()`, called by the tile and both widgets alike -
+`RemoteViews` can only set an `ImageView`'s bitmap directly, so this bitmap approach was already the
+only way onto the tile and is now the only way onto a widget too.
+
+**Word of the day: deterministic per calendar day, not per refresh.** `data/WordOfDay.kt` (pure
+Kotlin, `now` as a parameter, same discipline as `DigestWeek`/`ReviewScheduler`) picks
+`pool[(dayIndex(now) + tapOffset) % pool.size]`, preferring the register's currently-overdue words
+(reusing `LookupRepository.loadDueBatch()`'s existing query, the same one the quiz uses) over the full
+register when any exist. `dayIndex` is exposed separately from `pick` specifically so the 2x2 widget's
+tap-to-cycle offset can be added on top of today's baseline rather than always restarting a cycle from
+position 0 regardless of what day it is.
+
+**Update triggers: event-driven, not polling.** `updatePeriodMillis` is set to Android's own
+30-minute floor purely as a backstop; the real repaints are pushed from `LookupRepository`'s own
+save/delete paths (a new optional `context: Context? = null` constructor parameter, default-null so
+every existing test constructing a bare `LookupRepository(dao, providerFactory = ...)` keeps compiling
+unchanged) and from `MainViewModel.setLanguage` (which already had the single choke point
+`launcherIcon.switchTo(name)` for exactly this kind of "one line, alongside the existing call" addition).
+Day rollover deliberately rides the 30-minute floor rather than getting its own third alarm/receiver
+pair - a home-screen widget being up to 30 minutes late to flip to a new day's word is an
+unnoticeable tradeoff against a whole new scheduler for a cosmetic edge.
+
+**Tap behavior, deliberately asymmetric between the two widgets.** The 2x2 tile's entire body is the
+cycle action (`ACTION_CYCLE_WORD`, a custom broadcast back to the provider itself, per-widget-instance
+offset stored in `SharedPreferences` keyed by `appWidgetId` - the standard Android widget-state
+pattern, no Room schema change) - there is no separate "tap to open the app" zone on this one, matching
+the mockup's own "tap cycles the word" copy for the whole tile. The 4x2 tile has no tap-to-flip at
+all: it shows the week's digest count automatically only on Fridays (`Calendar.DAY_OF_WEEK ==
+FRIDAY`, computed fresh, not shared state with `DigestReminderScheduler`) and opens the app on Home
+otherwise - consistent with round 10's own reasoning for why the digest itself has no manual toggle
+("a passive, always-computed fact," not a user-chosen state).
+
+**`WidgetPreviewScreen.kt` stays, relabeled rather than removed or left stale.** Its Settings row
+changed from "Preview widgets and tile" to "See widgets before adding," and its header now says the
+real widgets are already available from the launcher's own Add-widget flow - a user who hasn't placed
+one yet still benefits from seeing what they'd get, so the mock screen earns its keep rather than
+becoming a redundant leftover now that the real thing exists.
+
+**`apk_inventory.py --diff` against the round-10 build**, confirmed to show exactly the expected
+shape and nothing else: two new `exported="true"` receivers (`WordOfDayWidgetProvider`,
+`DigestWidgetProvider` - the first exported receivers in this app, a real and unavoidable deviation
+from the two existing reminder receivers' `exported="false"`, since the system's own
+`APPWIDGET_UPDATE` broadcast originates outside this app's process), new `dex.app_classes` for the two
+providers plus `WidgetGlyphRenderer`/`WordOfDay`/`WordCandidate`, and one relabeled string. No new
+permissions (`BIND_APPWIDGET` is held by the launcher/host, never declared by the widget's own app), no
+new dependencies, no SQL change.
+
+Verified: `./gradlew :app:testReleaseUnitTest` green (83 tests, including the new `WordOfDayTest`),
+`./gradlew :app:assembleRelease` clean, the `apk_inventory.py --diff` shape above, and the emulator's
+own system Widgets picker (`wl_phone`, long-press home → Widgets → Word Lookup) correctly listing both
+widgets at "2×2"/"3×2" with the real `@string/widget_word_of_day_description` /
+`@string/widget_digest_description` copy pulled from actual resources - proof the manifest, appwidget-info
+XML, and string resources all resolve correctly end to end. **Not verified this round**: actually
+dragging a widget onto the home screen and confirming its `RemoteViews` render live - the emulator's
+launcher didn't accept a scripted `adb shell input draganddrop`/swipe sequence as a genuine long-press
+drag (a known-hard gesture to automate blind), so the layout inflating with real data on an actual
+placed instance is unconfirmed pending a real manual placement.
+
 ## Known drift vs. the desktop app
 
 - v0.1.0 (and this app, before this round) had **no `synonymsNative` column/field** — that's a
@@ -546,12 +957,43 @@ for the full design and why the app never has zero enabled LAUNCHER components. 
 where `manifest` intentionally isn't 100% parity-clean beyond the two-attribute-set exceptions above -
 diff it expecting these 26 additions, not zero.
 
-Any *other* permission, component, or attribute change beyond the three documented rounds above (5's
-security attributes, 6's launcher aliases) is still a regression.
+**`manifest` - intentional change, round 8.** `RECEIVE_BOOT_COMPLETED` and
+`.service.ReviewReminderReceiver` were added (the review reminder's alarm re-arming, see "Round 8" above).
+Since v0.1.0 itself declared `RECEIVE_BOOT_COMPLETED` (round 5 was the one that removed it), this
+permission's re-addition is actually invisible in a diff against the *original* - it only shows up as a
+regression if diffed against round 5-7's own inventory instead. The receiver addition does show up, and is
+the only thing to expect there.
+
+**`manifest` - intentional change, round 10.** `.service.DigestReminderReceiver` was added (the weekly
+digest's alarm re-arming, same shape as round 8's receiver, `exported="false"`, `BOOT_COMPLETED`-only
+filter, no new permission - `RECEIVE_BOOT_COMPLETED` was already declared). Confirmed via a real
+`--diff` against the round-9 build: this receiver is the only manifest delta round 10 makes - no new
+permission, no new provider (the CSV export path deliberately needs none, see "Round 10" above), no
+new activity/service.
+
+**`manifest` - intentional change, round 11.** Two new `<receiver>` components,
+`.service.WordOfDayWidgetProvider` and `.service.DigestWidgetProvider` (the two home-screen widgets) -
+both `exported="true"`, unlike every other receiver in this file, because the system's own
+`APPWIDGET_UPDATE` broadcast originates outside this app's process (see "Round 11" above for the
+reasoning). No new permission - `BIND_APPWIDGET` is held by the launcher/host, never declared by the
+widget's own app. Confirmed via a real `--diff` against the round-10 build: these two receivers, new
+`dex.app_classes` for them plus `WidgetGlyphRenderer`/`WordOfDay`/`WordCandidate`, and one relabeled
+string are the entire delta.
+
+Any *other* permission, component, or attribute change beyond the six documented rounds above (5's
+security attributes, 6's launcher aliases, 8's reminder receiver, 10's digest receiver, 11's two
+widget receivers) is still a regression.
 
 **`dependencies` - one intentional change.** `androidx.work:work-runtime-ktx` is gone as of round 5, for
 the same reason - taking `androidx.lifecycle:lifecycle-livedata`/`lifecycle-livedata-core-ktx` down with it
 transitively (confirmed via `--diff`; nothing in this app used LiveData directly, WorkManager pulled it in).
+Round 8 adds zero new dependencies - `TextToSpeech`, `AlarmManager`, and `NotificationManager` are all
+platform APIs, confirmed via a real `--diff` run against the round-8 build. Round 10 adds zero new
+dependencies too - `MediaStore`/`ContentValues` (CSV export) and a second `AlarmManager`/receiver pair
+(the digest) are all platform APIs or an existing pattern, confirmed via the same `--diff`. Round 11
+adds zero new dependencies either, and deliberately so - `androidx.glance:glance-appwidget` was
+evaluated and rejected specifically to avoid reviving WorkManager transitively (see "Round 11" above);
+`android.appwidget.*`/`android.widget.RemoteViews` are platform APIs, confirmed via the same `--diff`.
 Any *other* dependency change is still a regression.
 
 **Expected to differ, and why:**
@@ -563,7 +1005,16 @@ Any *other* dependency change is still a regression.
   `OnboardingProgress`), and removes `ui.components.StatusChip` (round 5's status pill has no monochrome
   equivalent — a granted permission is now a status dot, not a filled chip). Round 7 adds
   `ui.SettingsScreen`, `ui.components.FilledFieldColors`, and
-  `data.cache.LookupDatabaseKt$MIGRATION_3_4$1`.
+  `data.cache.LookupDatabaseKt$MIGRATION_3_4$1`. Round 8 adds `data.speech.*` (`Speaker`, `TtsLocales`,
+  `SpeechProvider`), `data.review.*` (`ReviewScheduler`, `ReviewCard`), `ui.ReviewScreen`,
+  `ui.ReviewSession`, `ui.CardSpeechFactory`, `ui.components.SpeakButton`, `service.ReviewReminderScheduler`,
+  `service.ReviewReminderReceiver`, and `data.cache.LookupDatabaseKt$MIGRATION_4_5$1`. Round 10 adds
+  `data.DigestWeek`, `data.export.RegisterCsvExporter` (+ its `Result` sealed interface),
+  `service.DigestReminderScheduler`, `service.DigestReminderReceiver`, and four new screen files
+  (`ui.LanguagePickerScreen`, `ui.TryLookupScreen`, `ui.WidgetPreviewScreen`, `ui.DigestScreen`) plus
+  their Compose-generated singletons. Round 11 adds `service.WidgetGlyphRenderer`,
+  `service.WordOfDayWidgetProvider`, `service.DigestWidgetProvider`, and `data.WordOfDay`/
+  `data.WordCandidate`.
 - `dex.languages` — `+Swedish`, intentional since round 1.
 - `dex.prompt_fragments` — the prompt now has field length caps, a `generationConfig` block, and two
   distinct retry-correction suffixes. None of this existed in v0.1.0; it's the accuracy/latency work itself.
@@ -578,7 +1029,11 @@ Any *other* dependency change is still a regression.
   that *does* show up** - Room's compiled `CREATE TABLE`/`INSERT OR REPLACE` string constants both changed
   shape (one new column, one new `?` placeholder), and those are exactly what the regex matches; the
   `ALTER TABLE` migration statement itself still only surfaces under `ui_text`, not `dex.sql`, for the
-  same under-matching reason. Current highest schema version: 4 (`app/schemas/.../4.json`).
+  same under-matching reason. **Schema v5 (round 8, six SM-2-lite scheduling columns) is the same kind
+  of exception v4 was** - the compiled `CREATE TABLE`/`INSERT OR REPLACE` constants both changed shape
+  again, so `dex.sql` does show it; the six `ALTER TABLE` statements and the new `dueAt` index still only
+  surface under `ui_text`, not `dex.sql` - verify those via `app/schemas/.../5.json` instead. Current
+  highest schema version: 5 (`app/schemas/.../5.json`).
 - `ui_text` — a mix of kotlinx-coroutines/serialization library strings that shift with unrelated code-path
   changes (harmless, not worth chasing), plus real new strings ("Word Lookup is off", the overlay-permission
   Toast text) that are expected.
