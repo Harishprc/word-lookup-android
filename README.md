@@ -58,7 +58,7 @@ Thai (ท), Indonesian (ID)
 
 ### Download the app
 
-> ### **[Download the APK →](https://github.com/Harishprc/word-lookup-android/releases/latest/download/app-release.apk)**
+> ### **[Download the APK →](https://github.com/Harishprc/word-lookup-android/releases/latest/download/word-lookup.apk)**
 >
 > One file, about 13 MB. Tap it once it's downloaded.
 
